@@ -1,0 +1,53 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "FP2 Zone Manager",
+        "description": "Set up FP2 Zone Manager to automatically control lights based on Aqara FP2 presence zones.\n\nAfter setup, use Configure to add zone mappings."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Already configured. Use Configure to manage zones."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Zone Mappings",
+        "description": "Manage your FP2 presence zone to light mappings."
+      },
+      "select_sensor": {
+        "title": "Select Presence Sensor",
+        "description": "Choose which FP2 presence zone triggers this mapping.",
+        "data": {
+          "sensor": "Presence sensor"
+        }
+      },
+      "select_target": {
+        "title": "Select Target Type",
+        "description": "Control an entire area (all lights in a room) or specific entities.",
+        "data": {
+          "target_type": "Target type"
+        }
+      },
+      "configure_area": {
+        "title": "Configure Area Target",
+        "description": "Select the area to control and optional settings.\n\nGroup: Link multiple sensors together so lights only turn off when ALL sensors in the group are clear.",
+        "data": {
+          "target_area": "Area",
+          "group": "Group name (optional)",
+          "delay": "Turn-off delay"
+        }
+      },
+      "configure_entities": {
+        "title": "Configure Entity Targets",
+        "description": "Select specific lights/switches to control.\n\nGroup: Link multiple sensors together so lights only turn off when ALL sensors in the group are clear.",
+        "data": {
+          "target_entities": "Entities to control",
+          "group": "Group name (optional)",
+          "delay": "Turn-off delay"
+        }
+      }
+    }
+  }
+}

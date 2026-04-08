@@ -1,0 +1,10 @@
+{
+  "domain": "fp2_zone_manager",
+  "name": "FP2 Zone Manager",
+  "codeowners": ["@SalihTalhaAydin"],
+  "config_flow": true,
+  "documentation": "https://github.com/SalihTalhaAydin/fp2-zone-manager",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/SalihTalhaAydin/fp2-zone-manager/issues",
+  "version": "1.0.0"
+}
