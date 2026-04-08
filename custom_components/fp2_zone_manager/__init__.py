@@ -193,15 +193,8 @@ class ZoneManager:
         key = self._key(z)
         if key in self._timers:
             self._timers.pop(key).cancel()
-        tgt = self._target(z)
-        if not tgt:
-            return
         _LOGGER.info("ON: %s", key)
-        self.hass.async_create_task(
-            self.hass.services.async_call(
-                "light", "turn_on", {}, target=tgt,
-            )
-        )
+        self._call_services(z, "turn_on")
 
     @callback
     def _schedule_off(self, z: dict):
@@ -238,22 +231,54 @@ class ZoneManager:
                 return
 
         _LOGGER.info("OFF: %s", key)
-        tgt = self._target(z)
-        if tgt:
-            await self.hass.services.async_call(
-                "light", "turn_off", {}, target=tgt,
-            )
+        await self._async_call_services(z, "turn_off")
 
-    def _target(self, z: dict) -> dict:
-        """Build target — areas + entities combined."""
-        t = {}
+    def _call_services(self, z: dict, action: str):
+        """Call turn_on/turn_off for areas, lights, switches."""
+        self.hass.async_create_task(
+            self._async_call_services(z, action)
+        )
+
+    async def _async_call_services(
+        self, z: dict, action: str
+    ):
+        """Handle areas + split entities by domain."""
         areas = z.get(CONF_TARGET_AREAS, [])
         ents = z.get(CONF_TARGET_ENTITIES, [])
+
+        # Areas — call light service (covers all lights)
         if areas:
-            t["area_id"] = areas
-        if ents:
-            t["entity_id"] = ents
-        return t
+            await self.hass.services.async_call(
+                "light", action, {},
+                target={"area_id": areas},
+            )
+            # Also call switch for any switches in areas
+            await self.hass.services.async_call(
+                "switch", action, {},
+                target={"area_id": areas},
+            )
+
+        # Entities — split by domain
+        lights = [e for e in ents if e.startswith("light.")]
+        switches = [e for e in ents
+                    if e.startswith("switch.")]
+        fans = [e for e in ents if e.startswith("fan.")]
+
+        if lights:
+            await self.hass.services.async_call(
+                "light", action, {},
+                target={"entity_id": lights},
+            )
+        if switches:
+            await self.hass.services.async_call(
+                "switch", action, {},
+                target={"entity_id": switches},
+            )
+        if fans:
+            await self.hass.services.async_call(
+                "fan", action, {},
+                target={"entity_id": fans},
+            )
 
     def _key(self, z: dict) -> str:
         grp = z.get(CONF_GROUP, "")
