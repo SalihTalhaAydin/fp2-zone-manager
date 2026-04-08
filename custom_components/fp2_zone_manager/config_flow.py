@@ -253,9 +253,9 @@ class FP2ZoneManagerOptionsFlow(OptionsFlowWithConfigEntry):
                     ): NumberSelector(
                         NumberSelectorConfig(
                             min=1,
-                            max=60,
+                            max=3600,
                             step=1,
-                            unit_of_measurement="minutes",
+                            unit_of_measurement="seconds",
                             mode=NumberSelectorMode.BOX,
                         )
                     ),
@@ -318,9 +318,9 @@ class FP2ZoneManagerOptionsFlow(OptionsFlowWithConfigEntry):
                     ): NumberSelector(
                         NumberSelectorConfig(
                             min=1,
-                            max=60,
+                            max=3600,
                             step=1,
-                            unit_of_measurement="minutes",
+                            unit_of_measurement="seconds",
                             mode=NumberSelectorMode.BOX,
                         )
                     ),

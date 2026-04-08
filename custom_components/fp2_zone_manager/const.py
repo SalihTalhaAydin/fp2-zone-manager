@@ -13,4 +13,4 @@ CONF_ZONES = "zones"
 TARGET_TYPE_AREA = "area"
 TARGET_TYPE_ENTITIES = "entities"
 
-DEFAULT_DELAY = 5  # minutes
+DEFAULT_DELAY = 300  # seconds (5 minutes)
