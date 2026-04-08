@@ -6,256 +6,185 @@ class FP2ZoneManagerPanel extends HTMLElement {
     this._editIdx = null;
   }
 
-  set hass(hass) {
-    this._hass = hass;
-    if (!this._built) {
-      this._build();
-      this._built = true;
-      this._load();
-    }
-  }
-
-  set panel(panel) {
-    this._panel = panel;
-  }
+  set hass(h) { this._hass = h; if (!this._b) { this._build(); this._b = 1; this._load(); } }
+  set panel(p) { this._p = p; }
 
   _build() {
     this.shadowRoot.innerHTML = `
     <style>
       :host {
-        display: block;
-        padding: 24px;
-        max-width: 900px;
-        margin: 0 auto;
+        display: block; padding: 24px 24px 60px;
+        max-width: 960px; margin: 0 auto;
         font-family: var(--ha-card-font-family, Roboto, sans-serif);
         color: var(--primary-text-color);
       }
-      .header {
-        display: flex; justify-content: space-between;
-        align-items: center; margin-bottom: 24px;
-      }
+      .hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
       h1 { margin: 0; font-size: 1.5em; font-weight: 400; }
-      .subtitle {
-        color: var(--secondary-text-color);
-        font-size: 0.9em; margin-top: 4px;
+      .sub { color: var(--secondary-text-color); font-size: 0.85em; margin-top: 4px; }
+      .btn-add {
+        background: var(--primary-color); color: #fff; border: none;
+        border-radius: 10px; padding: 10px 20px; cursor: pointer;
+        font-size: 0.95em; font-weight: 500;
       }
-      .add-btn {
-        background: var(--primary-color); color: white;
-        border: none; border-radius: 10px; padding: 10px 20px;
-        cursor: pointer; font-size: 0.95em; font-weight: 500;
-        transition: opacity 0.2s;
-      }
-      .add-btn:hover { opacity: 0.85; }
+      .btn-add:hover { opacity: .85; }
 
-      /* Table */
-      .zones-table {
-        width: 100%;
+      .card {
         background: var(--ha-card-background, var(--card-background-color));
-        border-radius: 12px;
-        overflow: hidden;
-        box-shadow: var(--ha-card-box-shadow, 0 2px 6px rgba(0,0,0,0.1));
+        border-radius: 12px; overflow: hidden;
+        box-shadow: var(--ha-card-box-shadow, 0 2px 6px rgba(0,0,0,.1));
       }
       table { width: 100%; border-collapse: collapse; }
       th {
         text-align: left; padding: 14px 16px;
-        background: var(--table-header-background-color, rgba(0,0,0,0.04));
-        color: var(--secondary-text-color);
-        font-size: 0.8em; font-weight: 600;
-        text-transform: uppercase; letter-spacing: 0.8px;
+        background: var(--table-header-background-color, rgba(0,0,0,.04));
+        color: var(--secondary-text-color); font-size: .78em;
+        font-weight: 600; text-transform: uppercase; letter-spacing: .8px;
       }
-      td {
-        padding: 14px 16px;
-        border-top: 1px solid var(--divider-color);
-        vertical-align: middle;
-      }
+      td { padding: 14px 16px; border-top: 1px solid var(--divider-color); vertical-align: middle; }
       tr:first-child td { border-top: none; }
-      tr:hover td {
-        background: var(--table-row-alternative-background-color, rgba(0,0,0,0.02));
-      }
+      tr:hover td { background: rgba(0,0,0,.02); }
 
-      /* Status dot */
-      .dot {
-        display: inline-block; width: 10px; height: 10px;
-        border-radius: 50%; vertical-align: middle;
-      }
-      .dot.on { background: #4caf50; box-shadow: 0 0 6px #4caf50aa; }
+      .dots { display: flex; gap: 4px; align-items: center; }
+      .dot { width: 9px; height: 9px; border-radius: 50%; }
+      .dot.on { background: #4caf50; box-shadow: 0 0 5px #4caf50aa; }
       .dot.off { background: #9e9e9e; }
 
-      /* Sensor name */
-      .sensor-name { font-weight: 500; }
-      .sensor-id {
-        font-size: 0.75em; color: var(--secondary-text-color);
-        margin-top: 2px;
+      .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+      .chip {
+        display: inline-block; padding: 3px 9px; border-radius: 6px;
+        font-size: .82em; font-weight: 500;
+      }
+      .chip.area { background: var(--primary-color); color: #fff; opacity: .85; }
+      .chip.ent { background: var(--accent-color, #ff9800); color: #fff; opacity: .85; }
+      .chip.sensor { background: var(--divider-color); color: var(--primary-text-color); }
+      .grp {
+        display: inline-block; padding: 3px 8px; border-radius: 4px;
+        font-size: .8em; background: var(--divider-color);
       }
 
-      /* Target */
-      .target-badge {
-        display: inline-block; padding: 4px 10px;
-        border-radius: 6px; font-size: 0.85em;
-      }
-      .target-badge.area {
-        background: var(--primary-color); color: white; opacity: 0.85;
-      }
-      .target-badge.entities {
-        background: var(--accent-color, #ff9800); color: white; opacity: 0.85;
-      }
-
-      /* Group */
-      .group-badge {
-        display: inline-block; padding: 3px 8px;
-        border-radius: 4px; font-size: 0.8em;
-        background: var(--divider-color);
-        color: var(--primary-text-color);
-      }
-
-      /* Actions */
-      .actions { display: flex; gap: 6px; }
-      .act-btn {
+      .acts { display: flex; gap: 6px; }
+      .abtn {
         background: none; border: 1px solid var(--divider-color);
-        cursor: pointer; padding: 6px 10px; border-radius: 6px;
-        color: var(--primary-text-color); font-size: 0.85em;
-        transition: all 0.2s;
+        cursor: pointer; padding: 5px 10px; border-radius: 6px;
+        color: var(--primary-text-color); font-size: .83em;
       }
-      .act-btn:hover { background: var(--divider-color); }
-      .act-btn.del { color: var(--error-color, #db4437); border-color: var(--error-color, #db4437); }
-      .act-btn.del:hover { background: var(--error-color, #db4437); color: white; }
+      .abtn:hover { background: var(--divider-color); }
+      .abtn.del { color: var(--error-color, #db4437); border-color: currentColor; }
+      .abtn.del:hover { background: var(--error-color); color: #fff; }
 
-      /* Empty state */
-      .empty {
-        text-align: center; padding: 60px 24px;
-        color: var(--secondary-text-color);
-      }
-      .empty-icon { font-size: 3em; margin-bottom: 12px; opacity: 0.4; }
+      .empty { text-align: center; padding: 60px 24px; color: var(--secondary-text-color); }
+      .empty-icon { font-size: 3em; margin-bottom: 12px; opacity: .35; }
       .empty-text { font-size: 1.1em; margin-bottom: 16px; }
 
       /* Modal */
-      .overlay {
-        display: none; position: fixed;
-        top: 0; left: 0; right: 0; bottom: 0;
-        background: rgba(0,0,0,0.5); z-index: 999;
+      .ov {
+        display: none; position: fixed; inset: 0;
+        background: rgba(0,0,0,.5); z-index: 999;
         justify-content: center; align-items: center;
       }
-      .overlay.open { display: flex; }
+      .ov.open { display: flex; }
       .modal {
         background: var(--ha-card-background, var(--card-background-color, #fff));
-        border-radius: 16px; padding: 28px;
-        min-width: 360px; max-width: 480px; width: 90%;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        border-radius: 16px; padding: 28px; width: 90%;
+        min-width: 360px; max-width: 520px;
+        box-shadow: 0 8px 32px rgba(0,0,0,.3);
+        max-height: 85vh; overflow-y: auto;
       }
-      .modal h2 { margin: 0 0 20px; font-weight: 400; }
-      .field { margin-bottom: 16px; }
-      .field label {
-        display: block; margin-bottom: 6px;
-        font-size: 0.85em; color: var(--secondary-text-color);
-        font-weight: 500;
+      .modal h2 { margin: 0 0 20px; font-weight: 400; font-size: 1.3em; }
+      .f { margin-bottom: 16px; }
+      .f label {
+        display: block; margin-bottom: 6px; font-size: .83em;
+        color: var(--secondary-text-color); font-weight: 500;
       }
-      .field select, .field input {
+      .f select, .f input {
         width: 100%; padding: 10px 12px;
-        border: 1px solid var(--divider-color);
-        border-radius: 8px;
+        border: 1px solid var(--divider-color); border-radius: 8px;
         background: var(--card-background-color, #fff);
-        color: var(--primary-text-color);
-        font-size: 0.95em;
+        color: var(--primary-text-color); font-size: .93em;
         box-sizing: border-box;
-        transition: border-color 0.2s;
       }
-      .field select:focus, .field input:focus {
-        outline: none;
-        border-color: var(--primary-color);
+      .f select:focus, .f input:focus { outline: none; border-color: var(--primary-color); }
+      .f select[multiple] { height: 150px; }
+      .hint { font-size: .73em; color: var(--secondary-text-color); margin-top: 4px; }
+      .mbtns { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+      .mbtns button {
+        padding: 10px 20px; border-radius: 8px; border: none;
+        cursor: pointer; font-size: .93em; font-weight: 500;
       }
-      .field select[multiple] { height: 140px; }
-      .field .hint {
-        font-size: 0.75em; color: var(--secondary-text-color);
-        margin-top: 4px;
+      .bc { background: var(--divider-color); color: var(--primary-text-color); }
+      .bs { background: var(--primary-color); color: #fff; }
+      .bs:hover, .bc:hover { opacity: .85; }
+
+      .section-label {
+        font-size: .75em; text-transform: uppercase; letter-spacing: .5px;
+        color: var(--secondary-text-color); margin: 20px 0 8px;
+        font-weight: 600; border-top: 1px solid var(--divider-color);
+        padding-top: 16px;
       }
-      .modal-btns {
-        display: flex; justify-content: flex-end;
-        gap: 10px; margin-top: 24px;
-      }
-      .modal-btns button {
-        padding: 10px 20px; border-radius: 8px;
-        border: none; cursor: pointer; font-size: 0.95em;
-        font-weight: 500; transition: opacity 0.2s;
-      }
-      .btn-cancel {
-        background: var(--divider-color);
-        color: var(--primary-text-color);
-      }
-      .btn-save { background: var(--primary-color); color: white; }
-      .btn-save:hover, .btn-cancel:hover { opacity: 0.85; }
     </style>
 
-    <div class="header">
+    <div class="hdr">
       <div>
         <h1>FP2 Zone Manager</h1>
-        <div class="subtitle">Map FP2 presence zones to lights and areas</div>
+        <div class="sub">Map presence zones to lights, areas, and entities</div>
       </div>
-      <button class="add-btn" id="addBtn">+ Add Zone</button>
+      <button class="btn-add" id="addBtn">+ Add Zone</button>
     </div>
+    <div class="card"><div id="ct"></div></div>
 
-    <div class="zones-table">
-      <div id="content"></div>
-    </div>
-
-    <div class="overlay" id="overlay">
+    <div class="ov" id="ov">
       <div class="modal">
-        <h2 id="modalTitle">Add Zone</h2>
-        <div class="field">
-          <label>Presence Sensor</label>
-          <select id="fSensor"></select>
+        <h2 id="mt">Add Zone Mapping</h2>
+
+        <div class="f">
+          <label>Presence Sensors</label>
+          <select id="fS" multiple></select>
+          <div class="hint">Select one or more FP2 zones. Hold Ctrl/Cmd for multiple.</div>
         </div>
-        <div class="field">
-          <label>Target Type</label>
-          <select id="fType">
-            <option value="area">Area — all lights in a room</option>
-            <option value="entities">Specific entities</option>
-          </select>
+
+        <div class="section-label">Targets — what to control</div>
+
+        <div class="f">
+          <label>Areas (optional)</label>
+          <select id="fA" multiple></select>
+          <div class="hint">All lights in selected areas will be controlled. Hold Ctrl/Cmd for multiple.</div>
         </div>
-        <div class="field" id="fAreaWrap">
-          <label>Area</label>
-          <select id="fArea"></select>
+
+        <div class="f">
+          <label>Entities (optional)</label>
+          <select id="fE" multiple></select>
+          <div class="hint">Additional specific lights/switches. Hold Ctrl/Cmd for multiple.</div>
         </div>
-        <div class="field" id="fEntWrap" style="display:none">
-          <label>Entities</label>
-          <select id="fEnt" multiple></select>
-          <div class="hint">Hold Ctrl/Cmd to select multiple</div>
+
+        <div class="section-label">Behavior</div>
+
+        <div class="f">
+          <label>Group name (optional)</label>
+          <input id="fG" placeholder="e.g. basement_kitchen">
+          <div class="hint">Zones with the same group name are linked — lights turn off only when ALL sensors in the group are clear.</div>
         </div>
-        <div class="field">
-          <label>Group</label>
-          <input id="fGroup" placeholder="e.g. basement_kitchen">
-          <div class="hint">Link sensors together — lights off only when all sensors in group clear</div>
-        </div>
-        <div class="field">
+
+        <div class="f">
           <label>Turn-off delay (seconds)</label>
-          <input type="number" id="fDelay" value="300" min="1" max="3600">
+          <input type="number" id="fD" value="300" min="1" max="3600">
         </div>
-        <div class="modal-btns">
-          <button class="btn-cancel" id="btnCancel">Cancel</button>
-          <button class="btn-save" id="btnSave">Save</button>
+
+        <div class="mbtns">
+          <button class="bc" id="cn">Cancel</button>
+          <button class="bs" id="sv">Save</button>
         </div>
       </div>
     </div>`;
 
     const $ = id => this.shadowRoot.getElementById(id);
-    this._$ = {
-      content: $("content"), overlay: $("overlay"),
-      modalTitle: $("modalTitle"),
-      fSensor: $("fSensor"), fType: $("fType"),
-      fAreaWrap: $("fAreaWrap"), fEntWrap: $("fEntWrap"),
-      fArea: $("fArea"), fEnt: $("fEnt"),
-      fGroup: $("fGroup"), fDelay: $("fDelay"),
+    this._el = {
+      ct: $("ct"), ov: $("ov"), mt: $("mt"),
+      fS: $("fS"), fA: $("fA"), fE: $("fE"),
+      fG: $("fG"), fD: $("fD"),
     };
-
-    $("addBtn").onclick = () => this._openModal();
-    $("btnCancel").onclick = () => this._closeModal();
-    $("btnSave").onclick = () => this._saveZone();
-    this._$.fType.onchange = () => this._toggleTarget();
-  }
-
-  _toggleTarget() {
-    const isArea = this._$.fType.value === "area";
-    this._$.fAreaWrap.style.display = isArea ? "" : "none";
-    this._$.fEntWrap.style.display = isArea ? "none" : "";
+    $("addBtn").onclick = () => this._open();
+    $("cn").onclick = () => this._close();
+    $("sv").onclick = () => this._save();
   }
 
   async _load() {
@@ -264,98 +193,99 @@ class FP2ZoneManagerPanel extends HTMLElement {
         { type: "fp2_zone_manager/zones/get" }
       );
       this._zones = r.zones || [];
-    } catch {
-      this._zones = [];
-    }
+    } catch { this._zones = []; }
     this._render();
   }
 
   _render() {
     const z = this._zones;
     if (!z.length) {
-      this._$.content.innerHTML = `
+      this._el.ct.innerHTML = `
         <div class="empty">
-          <div class="empty-icon">&#128269;</div>
-          <div class="empty-text">No zones configured yet</div>
-          <button class="add-btn" id="emptyAdd">+ Add Your First Zone</button>
+          <div class="empty-icon">&#9881;</div>
+          <div class="empty-text">No zone mappings yet</div>
+          <button class="btn-add" id="ea">+ Add Your First Zone</button>
         </div>`;
-      this.shadowRoot.getElementById("emptyAdd").onclick =
-        () => this._openModal();
+      this.shadowRoot.getElementById("ea").onclick = () => this._open();
       return;
     }
 
-    let h = `<table>
-      <thead><tr>
-        <th style="width:40px"></th>
-        <th>Sensor</th>
-        <th>Target</th>
-        <th>Group</th>
-        <th>Delay</th>
-        <th style="width:120px"></th>
-      </tr></thead><tbody>`;
+    let h = `<table><thead><tr>
+      <th style="width:50px">Status</th>
+      <th>Sensors</th><th>Targets</th>
+      <th>Group</th><th>Delay</th><th style="width:130px"></th>
+    </tr></thead><tbody>`;
 
     z.forEach((zone, i) => {
-      const st = this._hass.states[zone.sensor];
-      const on = st?.state === "on";
-      const name = st?.attributes?.friendly_name
-        || zone.sensor.split(".").pop().replace(/_/g, " ");
+      // Status dots for each sensor
+      const sensors = zone.sensors || [];
+      const dots = sensors.map(s => {
+        const st = this._hass.states[s];
+        const on = st?.state === "on";
+        return `<span class="dot ${on ? "on" : "off"}" title="${s}"></span>`;
+      }).join("");
 
-      let target;
-      if (zone.target_type === "area") {
-        const aName = this._areaName(zone.target_area);
-        target = `<span class="target-badge area">${aName}</span>`;
-      } else {
-        const n = (zone.target_entities || []).length;
-        target = `<span class="target-badge entities">${n} entities</span>`;
-      }
+      // Sensor names
+      const sensorChips = sensors.map(s => {
+        const st = this._hass.states[s];
+        const nm = st?.attributes?.friendly_name
+          || s.split(".").pop().replace(/_/g, " ");
+        return `<span class="chip sensor">${nm}</span>`;
+      }).join("");
 
-      const group = zone.group
-        ? `<span class="group-badge">${zone.group}</span>`
-        : "—";
+      // Target chips
+      const areas = zone.target_areas || [];
+      const ents = zone.target_entities || [];
+      const areaChips = areas.map(a =>
+        `<span class="chip area">${this._areaName(a)}</span>`
+      ).join("");
+      const entChips = ents.map(e => {
+        const st = this._hass.states[e];
+        const nm = st?.attributes?.friendly_name || e.split(".").pop();
+        return `<span class="chip ent">${nm}</span>`;
+      }).join("");
+
+      const grp = zone.group
+        ? `<span class="grp">${zone.group}</span>` : "—";
 
       h += `<tr>
-        <td><span class="dot ${on ? "on" : "off"}"></span></td>
-        <td>
-          <div class="sensor-name">${name}</div>
-        </td>
-        <td>${target}</td>
-        <td>${group}</td>
+        <td><div class="dots">${dots}</div></td>
+        <td><div class="chips">${sensorChips}</div></td>
+        <td><div class="chips">${areaChips}${entChips}</div></td>
+        <td>${grp}</td>
         <td>${zone.delay || 300}s</td>
-        <td class="actions">
-          <button class="act-btn" data-a="e" data-i="${i}">Edit</button>
-          <button class="act-btn del" data-a="d" data-i="${i}">Delete</button>
+        <td class="acts">
+          <button class="abtn" data-a="e" data-i="${i}">Edit</button>
+          <button class="abtn del" data-a="d" data-i="${i}">Delete</button>
         </td>
       </tr>`;
     });
 
     h += "</tbody></table>";
-    this._$.content.innerHTML = h;
-
-    this._$.content.querySelectorAll(".act-btn").forEach(btn => {
-      btn.onclick = () => {
-        const i = +btn.dataset.i;
-        btn.dataset.a === "e"
-          ? this._openModal(i)
-          : this._deleteZone(i);
+    this._el.ct.innerHTML = h;
+    this._el.ct.querySelectorAll(".abtn").forEach(b => {
+      b.onclick = () => {
+        const i = +b.dataset.i;
+        b.dataset.a === "e" ? this._open(i) : this._del(i);
       };
     });
   }
 
   _areaName(id) {
-    const areas = this._hass.areas || {};
-    const a = Object.values(areas).find(x => x.area_id === id);
+    const a = Object.values(this._hass.areas || {})
+      .find(x => x.area_id === id);
     return a ? a.name : id;
   }
 
-  _openModal(idx = null) {
+  _open(idx = null) {
     this._editIdx = idx;
-    this._$.modalTitle.textContent =
-      idx !== null ? "Edit Zone" : "Add Zone";
+    this._el.mt.textContent = idx !== null
+      ? "Edit Zone Mapping" : "Add Zone Mapping";
 
     const s = this._hass.states;
 
-    // Sensors
-    this._$.fSensor.innerHTML = "";
+    // Populate sensors
+    this._el.fS.innerHTML = "";
     Object.keys(s)
       .filter(e => e.startsWith("binary_sensor.")
         && e.includes("presence_sensor"))
@@ -364,93 +294,100 @@ class FP2ZoneManagerPanel extends HTMLElement {
         const o = new Option(
           s[e].attributes.friendly_name || e, e
         );
-        this._$.fSensor.add(o);
+        this._el.fS.add(o);
       });
 
-    // Areas
-    this._$.fArea.innerHTML = "";
+    // Populate areas
+    this._el.fA.innerHTML = "";
     Object.values(this._hass.areas || {})
       .sort((a, b) => a.name.localeCompare(b.name))
       .forEach(a => {
-        this._$.fArea.add(new Option(a.name, a.area_id));
+        this._el.fA.add(new Option(a.name, a.area_id));
       });
 
-    // Entities
-    this._$.fEnt.innerHTML = "";
+    // Populate entities
+    this._el.fE.innerHTML = "";
     Object.keys(s)
       .filter(e => e.startsWith("light.")
         || e.startsWith("switch."))
       .sort()
       .forEach(e => {
-        this._$.fEnt.add(new Option(
+        this._el.fE.add(new Option(
           s[e].attributes.friendly_name || e, e
         ));
       });
 
-    // Pre-fill
+    // Pre-fill if editing
     if (idx !== null && this._zones[idx]) {
       const z = this._zones[idx];
-      this._$.fSensor.value = z.sensor;
-      this._$.fType.value = z.target_type;
-      this._$.fArea.value = z.target_area || "";
-      Array.from(this._$.fEnt.options).forEach(o =>
-        o.selected = (z.target_entities || []).includes(o.value)
-      );
-      this._$.fGroup.value = z.group || "";
-      this._$.fDelay.value = z.delay || 300;
+      const sensors = z.sensors || [];
+      const areas = z.target_areas || [];
+      const ents = z.target_entities || [];
+      Array.from(this._el.fS.options).forEach(o =>
+        o.selected = sensors.includes(o.value));
+      Array.from(this._el.fA.options).forEach(o =>
+        o.selected = areas.includes(o.value));
+      Array.from(this._el.fE.options).forEach(o =>
+        o.selected = ents.includes(o.value));
+      this._el.fG.value = z.group || "";
+      this._el.fD.value = z.delay || 300;
     } else {
-      this._$.fGroup.value = "";
-      this._$.fDelay.value = 300;
+      Array.from(this._el.fS.options).forEach(o => o.selected = false);
+      Array.from(this._el.fA.options).forEach(o => o.selected = false);
+      Array.from(this._el.fE.options).forEach(o => o.selected = false);
+      this._el.fG.value = "";
+      this._el.fD.value = 300;
     }
 
-    this._toggleTarget();
-    this._$.overlay.classList.add("open");
+    this._el.ov.classList.add("open");
   }
 
-  _closeModal() {
-    this._$.overlay.classList.remove("open");
+  _close() {
+    this._el.ov.classList.remove("open");
     this._editIdx = null;
   }
 
-  async _saveZone() {
-    const tt = this._$.fType.value;
+  async _save() {
+    const sel = el => Array.from(el.selectedOptions).map(o => o.value);
+    const sensors = sel(this._el.fS);
+    const areas = sel(this._el.fA);
+    const ents = sel(this._el.fE);
+
+    if (!sensors.length) {
+      alert("Select at least one sensor.");
+      return;
+    }
+    if (!areas.length && !ents.length) {
+      alert("Select at least one area or entity.");
+      return;
+    }
+
     const zone = {
-      sensor: this._$.fSensor.value,
-      target_type: tt,
-      target_area: tt === "area" ? this._$.fArea.value : "",
-      target_entities: tt === "entities"
-        ? Array.from(this._$.fEnt.selectedOptions).map(o => o.value)
-        : [],
-      group: this._$.fGroup.value.trim(),
-      delay: parseInt(this._$.fDelay.value) || 300,
+      sensors,
+      target_areas: areas,
+      target_entities: ents,
+      group: this._el.fG.value.trim(),
+      delay: parseInt(this._el.fD.value) || 300,
     };
 
     const zones = [...this._zones];
-    if (this._editIdx !== null) {
-      zones[this._editIdx] = zone;
-    } else {
-      zones.push(zone);
-    }
+    if (this._editIdx !== null) zones[this._editIdx] = zone;
+    else zones.push(zone);
 
     await this._hass.connection.sendMessagePromise({
-      type: "fp2_zone_manager/zones/set",
-      zones,
+      type: "fp2_zone_manager/zones/set", zones,
     });
-
     this._zones = zones;
     this._render();
-    this._closeModal();
+    this._close();
   }
 
-  async _deleteZone(i) {
+  async _del(i) {
     const zones = [...this._zones];
     zones.splice(i, 1);
-
     await this._hass.connection.sendMessagePromise({
-      type: "fp2_zone_manager/zones/set",
-      zones,
+      type: "fp2_zone_manager/zones/set", zones,
     });
-
     this._zones = zones;
     this._render();
   }
