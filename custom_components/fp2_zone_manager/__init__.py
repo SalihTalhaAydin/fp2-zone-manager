@@ -6,11 +6,14 @@ import asyncio
 import logging
 from pathlib import Path
 
+import voluptuous as vol
+
+from homeassistant.components import frontend, websocket_api
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_ON, STATE_OFF
 from homeassistant.core import HomeAssistant, callback, Event
 from homeassistant.helpers.event import async_track_state_change_event
-from homeassistant.components.http import StaticPathConfig
 
 from .const import (
     DOMAIN,
@@ -28,14 +31,14 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 FRONTEND_PATH = Path(__file__).parent / "frontend"
-CARD_URL = "/fp2_zone_manager/fp2-zone-manager-card.js"
+PANEL_URL = "/fp2_zone_manager/panel.js"
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> bool:
     """Set up FP2 Zone Manager from a config entry."""
-    # Serve the frontend card JS
+    # Serve frontend files
     await hass.http.async_register_static_paths(
         [
             StaticPathConfig(
@@ -46,15 +49,33 @@ async def async_setup_entry(
         ]
     )
 
-    # Register WebSocket command for saving zones
+    # Register sidebar panel
+    frontend.async_register_built_in_panel(
+        hass,
+        component_name="custom",
+        sidebar_title="Zone Manager",
+        sidebar_icon="mdi:motion-sensor",
+        frontend_url_path="fp2-zones",
+        config={
+            "_panel_custom": {
+                "name": "fp2-zone-manager-panel",
+                "module_url": PANEL_URL,
+            }
+        },
+        require_admin=False,
+    )
+
+    # Register WebSocket commands
     if "fp2_zone_manager_ws" not in hass.data:
         hass.data["fp2_zone_manager_ws"] = True
-        hass.components.websocket_api.async_register_command(
+        websocket_api.async_register_command(
+            hass,
             "fp2_zone_manager/zones/get",
             _ws_get_zones,
             _WS_GET_SCHEMA,
         )
-        hass.components.websocket_api.async_register_command(
+        websocket_api.async_register_command(
+            hass,
             "fp2_zone_manager/zones/set",
             _ws_set_zones,
             _WS_SET_SCHEMA,
@@ -69,9 +90,6 @@ async def async_setup_entry(
     )
     return True
 
-
-import voluptuous as vol
-from homeassistant.components import websocket_api
 
 _WS_GET_SCHEMA = websocket_api.BASE_COMMAND_MESSAGE_SCHEMA.extend(
     {vol.Required("type"): "fp2_zone_manager/zones/get"}
@@ -101,15 +119,22 @@ def _ws_get_zones(hass, connection, msg):
 
 @callback
 def _ws_set_zones(hass, connection, msg):
-    """Save zone configs."""
+    """Save zone configs and reload the manager."""
     entries = hass.config_entries.async_entries(DOMAIN)
     if not entries:
-        connection.send_error(msg["id"], "not_found", "")
+        connection.send_error(
+            msg["id"], "not_found", "No entry"
+        )
         return
     entry = entries[0]
     hass.config_entries.async_update_entry(
         entry, data={CONF_ZONES: msg["zones"]}
     )
+    # Reload the zone manager
+    mgr = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if mgr:
+        mgr.async_stop()
+        hass.async_create_task(mgr.async_start())
     connection.send_result(msg["id"], {"success": True})
 
 
@@ -120,6 +145,7 @@ async def async_unload_entry(
     manager = hass.data[DOMAIN].pop(entry.entry_id, None)
     if manager:
         manager.async_stop()
+    frontend.async_remove_panel(hass, "fp2-zones")
     return True
 
 
@@ -153,7 +179,7 @@ class ZoneManager:
         """Start listening to all configured sensors."""
         zones = self._get_zones()
         if not zones:
-            _LOGGER.info("FP2 Zone Manager: No zones configured")
+            _LOGGER.info("FP2 Zone Manager: No zones")
             return
 
         sensors = list(
@@ -161,24 +187,21 @@ class ZoneManager:
         )
         _LOGGER.info(
             "FP2 Zone Manager: %d sensors, %d zones",
-            len(sensors),
-            len(zones),
+            len(sensors), len(zones),
         )
 
         unsub = async_track_state_change_event(
-            self.hass,
-            sensors,
+            self.hass, sensors,
             self._handle_state_change,
         )
         self._unsub_listeners.append(unsub)
 
     @callback
     def async_stop(self) -> None:
-        """Stop listeners and cancel pending timers."""
+        """Stop listeners and cancel timers."""
         for unsub in self._unsub_listeners:
             unsub()
         self._unsub_listeners.clear()
-
         for handle in self._pending_off.values():
             handle.cancel()
         self._pending_off.clear()
@@ -186,37 +209,31 @@ class ZoneManager:
     @callback
     def _handle_state_change(self, event: Event) -> None:
         """Handle a sensor state change."""
-        entity_id = event.data.get("entity_id")
-        new_state = event.data.get("new_state")
-        old_state = event.data.get("old_state")
+        eid = event.data.get("entity_id")
+        new_s = event.data.get("new_state")
+        old_s = event.data.get("old_state")
 
-        if new_state is None or old_state is None:
+        if not new_s or not old_s:
             return
-        if new_state.state == old_state.state:
+        if new_s.state == old_s.state:
             return
 
-        zones = self._get_zones()
-        matching = [
-            z for z in zones
-            if z[CONF_SENSOR] == entity_id
-        ]
-
-        for zone in matching:
-            if new_state.state == STATE_ON:
-                self._handle_presence_on(zone)
-            elif new_state.state == STATE_OFF:
-                self._handle_presence_off(zone)
+        for zone in self._get_zones():
+            if zone[CONF_SENSOR] != eid:
+                continue
+            if new_s.state == STATE_ON:
+                self._handle_on(zone)
+            elif new_s.state == STATE_OFF:
+                self._handle_off(zone)
 
     @callback
-    def _handle_presence_on(self, zone: dict) -> None:
-        """Presence detected — turn on immediately."""
-        key = self._get_target_key(zone)
-
+    def _handle_on(self, zone: dict) -> None:
+        """Presence detected — turn on."""
+        key = self._key(zone)
         if key in self._pending_off:
-            self._pending_off[key].cancel()
-            del self._pending_off[key]
+            self._pending_off.pop(key).cancel()
 
-        target = self._build_target(zone)
+        target = self._target(zone)
         _LOGGER.info("Presence ON: %s", key)
         self.hass.async_create_task(
             self.hass.services.async_call(
@@ -225,59 +242,50 @@ class ZoneManager:
         )
 
     @callback
-    def _handle_presence_off(self, zone: dict) -> None:
-        """Presence cleared — start delay timer."""
-        key = self._get_target_key(zone)
+    def _handle_off(self, zone: dict) -> None:
+        """Presence cleared — start delay."""
+        key = self._key(zone)
         delay = zone.get(CONF_DELAY, DEFAULT_DELAY)
 
         if key in self._pending_off:
-            self._pending_off[key].cancel()
-
-        _LOGGER.debug("Presence OFF: %s, %ds", key, delay)
+            self._pending_off.pop(key).cancel()
 
         self._pending_off[key] = (
             self.hass.loop.call_later(
                 delay,
                 lambda z=zone: self.hass.async_create_task(
-                    self._async_check_and_turn_off(z)
+                    self._check_off(z)
                 ),
             )
         )
 
-    async def _async_check_and_turn_off(
-        self, zone: dict
-    ) -> None:
-        """Check all group sensors clear, then turn off."""
-        key = self._get_target_key(zone)
+    async def _check_off(self, zone: dict) -> None:
+        """Check group sensors clear, then turn off."""
+        key = self._key(zone)
         self._pending_off.pop(key, None)
 
         group = zone.get(CONF_GROUP, "")
-        zones = self._get_zones()
-
         if group:
             siblings = [
                 z[CONF_SENSOR]
-                for z in zones
+                for z in self._get_zones()
                 if z.get(CONF_GROUP) == group
             ]
         else:
             siblings = [zone[CONF_SENSOR]]
 
         for sid in siblings:
-            state = self.hass.states.get(sid)
-            if state and state.state == STATE_ON:
-                _LOGGER.debug(
-                    "Skip off %s — %s active", key, sid
-                )
+            st = self.hass.states.get(sid)
+            if st and st.state == STATE_ON:
                 return
 
         _LOGGER.info("All clear: off %s", key)
-        target = self._build_target(zone)
         await self.hass.services.async_call(
-            "light", "turn_off", {}, target=target
+            "light", "turn_off", {},
+            target=self._target(zone),
         )
 
-    def _build_target(self, zone: dict) -> dict:
+    def _target(self, zone: dict) -> dict:
         """Build service call target."""
         if zone[CONF_TARGET_TYPE] == TARGET_TYPE_AREA:
             return {"area_id": zone[CONF_TARGET_AREA]}
@@ -287,11 +295,11 @@ class ZoneManager:
             )
         }
 
-    def _get_target_key(self, zone: dict) -> str:
-        """Get unique key for zone target."""
-        group = zone.get(CONF_GROUP, "")
-        if group:
-            return f"group_{group}"
+    def _key(self, zone: dict) -> str:
+        """Unique key for zone target."""
+        g = zone.get(CONF_GROUP, "")
+        if g:
+            return f"grp_{g}"
         if zone[CONF_TARGET_TYPE] == TARGET_TYPE_AREA:
             return f"area_{zone[CONF_TARGET_AREA]}"
         ents = zone.get(CONF_TARGET_ENTITIES, [])
