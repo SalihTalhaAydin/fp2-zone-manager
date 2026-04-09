@@ -121,6 +121,23 @@ class FP2ZoneManagerPanel extends HTMLElement {
         font-weight: 600; border-top: 1px solid var(--divider-color);
         padding-top: 16px;
       }
+      .advanced-toggle {
+        display: flex; align-items: center; gap: 6px;
+        cursor: pointer; padding: 12px 0;
+        color: var(--secondary-text-color);
+        font-size: .85em; font-weight: 500;
+        border-top: 1px solid var(--divider-color);
+        margin-top: 12px; user-select: none;
+      }
+      .advanced-toggle:hover { color: var(--primary-color); }
+      .advanced-toggle .arrow {
+        display: inline-block; transition: transform .2s;
+      }
+      .advanced-toggle.open .arrow { transform: rotate(90deg); }
+      .advanced-section {
+        display: none; padding-top: 4px;
+      }
+      .advanced-section.open { display: block; }
     </style>
 
     <div class="hdr">
@@ -156,31 +173,34 @@ class FP2ZoneManagerPanel extends HTMLElement {
           <div class="hint">Additional specific lights/switches. Hold Ctrl/Cmd for multiple.</div>
         </div>
 
-        <div class="section-label">Active Time Window (optional)</div>
-
-        <div class="f">
-          <label>Start time</label>
-          <input id="fST" placeholder="e.g. 07:00, sunrise, sunset-30m">
-          <div class="hint">Fixed time (HH:MM), or sunrise/sunset with optional offset: sunset+2h, sunrise-30m, sunset+1h30m</div>
+        <div class="advanced-toggle" id="advToggle">
+          <span class="arrow">&#9656;</span>
+          <span>Advanced options</span>
         </div>
 
-        <div class="f">
-          <label>End time</label>
-          <input id="fET" placeholder="e.g. 23:00, sunset+2h">
-          <div class="hint">Leave both empty to always be active</div>
-        </div>
+        <div class="advanced-section" id="advSec">
+          <div class="f">
+            <label>Turn-off delay (seconds)</label>
+            <input type="number" id="fD" value="300" min="1" max="3600">
+          </div>
 
-        <div class="section-label">Behavior</div>
+          <div class="f">
+            <label>Group name (optional)</label>
+            <input id="fG" placeholder="e.g. basement_kitchen">
+            <div class="hint">Zones with the same group name are linked — lights turn off only when ALL sensors in the group are clear.</div>
+          </div>
 
-        <div class="f">
-          <label>Group name (optional)</label>
-          <input id="fG" placeholder="e.g. basement_kitchen">
-          <div class="hint">Zones with the same group name are linked — lights turn off only when ALL sensors in the group are clear.</div>
-        </div>
+          <div class="f">
+            <label>Active from (optional)</label>
+            <input id="fST" placeholder="e.g. 07:00, sunrise, sunset-30m">
+            <div class="hint">HH:MM, or sunrise/sunset with offset: sunset+2h, sunrise-30m, sunset+1h30m</div>
+          </div>
 
-        <div class="f">
-          <label>Turn-off delay (seconds)</label>
-          <input type="number" id="fD" value="300" min="1" max="3600">
+          <div class="f">
+            <label>Active until (optional)</label>
+            <input id="fET" placeholder="e.g. 23:00, sunset+2h">
+            <div class="hint">Leave both empty for always active</div>
+          </div>
         </div>
 
         <div class="mbtns">
@@ -200,6 +220,15 @@ class FP2ZoneManagerPanel extends HTMLElement {
     $("addBtn").onclick = () => this._open();
     $("cn").onclick = () => this._close();
     $("sv").onclick = () => this._save();
+
+    const advToggle = $("advToggle");
+    const advSec = $("advSec");
+    advToggle.onclick = () => {
+      advToggle.classList.toggle("open");
+      advSec.classList.toggle("open");
+    };
+    this._el.advToggle = advToggle;
+    this._el.advSec = advSec;
   }
 
   async _load() {
@@ -341,6 +370,7 @@ class FP2ZoneManagerPanel extends HTMLElement {
       });
 
     // Pre-fill if editing
+    let hasAdvanced = false;
     if (idx !== null && this._zones[idx]) {
       const z = this._zones[idx];
       const sensors = z.sensors || [];
@@ -356,6 +386,10 @@ class FP2ZoneManagerPanel extends HTMLElement {
       this._el.fD.value = z.delay || 300;
       this._el.fST.value = z.start_time || "";
       this._el.fET.value = z.end_time || "";
+      hasAdvanced = !!(
+        z.group || z.start_time || z.end_time
+        || (z.delay && z.delay !== 300)
+      );
     } else {
       Array.from(this._el.fS.options).forEach(o => o.selected = false);
       Array.from(this._el.fA.options).forEach(o => o.selected = false);
@@ -364,6 +398,15 @@ class FP2ZoneManagerPanel extends HTMLElement {
       this._el.fD.value = 300;
       this._el.fST.value = "";
       this._el.fET.value = "";
+    }
+
+    // Collapse/expand advanced section based on contents
+    if (hasAdvanced) {
+      this._el.advToggle.classList.add("open");
+      this._el.advSec.classList.add("open");
+    } else {
+      this._el.advToggle.classList.remove("open");
+      this._el.advSec.classList.remove("open");
     }
 
     this._el.ov.classList.add("open");
