@@ -17,7 +17,7 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
 )
 
-from datetime import datetime, time as dtime, timedelta
+from datetime import datetime, timedelta
 
 import homeassistant.util.dt as dt_util
 
@@ -25,7 +25,9 @@ from .const import (
     DOMAIN, CONF_SENSORS, CONF_TARGET_AREAS,
     CONF_TARGET_ENTITIES, CONF_GROUP, CONF_DELAY,
     CONF_START_TIME, CONF_END_TIME,
-    CONF_ZONES, DEFAULT_DELAY,
+    CONF_ZONES, CONF_GLOBAL, CONF_GLOBAL_START,
+    CONF_GLOBAL_END, CONF_GLOBAL_DELAY,
+    DEFAULT_DELAY,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -66,6 +68,10 @@ async def async_setup_entry(
             hass, "fp2_zone_manager/zones/set",
             _ws_set, _WS_SET,
         )
+        websocket_api.async_register_command(
+            hass, "fp2_zone_manager/global/set",
+            _ws_set_global, _WS_SET_GLOBAL,
+        )
 
     mgr = ZoneManager(hass, entry)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = mgr
@@ -85,17 +91,26 @@ _WS_SET = websocket_api.BASE_COMMAND_MESSAGE_SCHEMA.extend(
         vol.Required("zones"): list,
     }
 )
+_WS_SET_GLOBAL = (
+    websocket_api.BASE_COMMAND_MESSAGE_SCHEMA.extend({
+        vol.Required("type"): "fp2_zone_manager/global/set",
+        vol.Required("global"): dict,
+    })
+)
 
 
 @callback
 def _ws_get(hass, conn, msg):
     entries = hass.config_entries.async_entries(DOMAIN)
-    zones, eid = [], None
+    zones, eid, glb = [], None, {}
     if entries:
         eid = entries[0].entry_id
         zones = entries[0].data.get(CONF_ZONES, [])
+        glb = entries[0].data.get(CONF_GLOBAL, {}) or {}
     conn.send_result(msg["id"], {
-        "zones": zones, "entry_id": eid,
+        "zones": zones,
+        "entry_id": eid,
+        "global": glb,
     })
 
 
@@ -106,13 +121,31 @@ def _ws_set(hass, conn, msg):
         conn.send_error(msg["id"], "not_found", "")
         return
     entry = entries[0]
+    # Preserve existing global config
+    new_data = dict(entry.data)
+    new_data[CONF_ZONES] = msg["zones"]
     hass.config_entries.async_update_entry(
-        entry, data={CONF_ZONES: msg["zones"]}
+        entry, data=new_data
     )
     mgr = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if mgr:
         mgr.async_stop()
         hass.async_create_task(mgr.async_start())
+    conn.send_result(msg["id"], {"success": True})
+
+
+@callback
+def _ws_set_global(hass, conn, msg):
+    entries = hass.config_entries.async_entries(DOMAIN)
+    if not entries:
+        conn.send_error(msg["id"], "not_found", "")
+        return
+    entry = entries[0]
+    new_data = dict(entry.data)
+    new_data[CONF_GLOBAL] = msg["global"]
+    hass.config_entries.async_update_entry(
+        entry, data=new_data
+    )
     conn.send_result(msg["id"], {"success": True})
 
 
@@ -146,6 +179,9 @@ class ZoneManager:
 
     def _zones(self) -> list[dict]:
         return self.entry.data.get(CONF_ZONES, [])
+
+    def _global(self) -> dict:
+        return self.entry.data.get(CONF_GLOBAL, {}) or {}
 
     async def async_start(self):
         zones = self._zones()
@@ -207,7 +243,9 @@ class ZoneManager:
     @callback
     def _schedule_off(self, z: dict):
         key = self._key(z)
-        delay = z.get(CONF_DELAY, DEFAULT_DELAY)
+        delay = z.get(CONF_DELAY) or self._global().get(
+            CONF_GLOBAL_DELAY
+        ) or DEFAULT_DELAY
         if key in self._timers:
             self._timers.pop(key).cancel()
         self._timers[key] = self.hass.loop.call_later(
@@ -297,9 +335,19 @@ class ZoneManager:
         return "t_" + "_".join(sorted(areas + ents))
 
     def _in_window(self, z: dict) -> bool:
-        """Check if current time is within zone's window."""
+        """Check if current time is within zone's window.
+
+        Falls back to global window if zone has none set.
+        """
         start = z.get(CONF_START_TIME, "")
         end = z.get(CONF_END_TIME, "")
+
+        # Fall back to global window
+        if not start and not end:
+            g = self._global()
+            start = g.get(CONF_GLOBAL_START, "")
+            end = g.get(CONF_GLOBAL_END, "")
+
         if not start and not end:
             return True  # no window = always active
 

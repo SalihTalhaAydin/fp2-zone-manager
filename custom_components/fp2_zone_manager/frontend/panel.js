@@ -145,9 +145,38 @@ class FP2ZoneManagerPanel extends HTMLElement {
         <h1>FP2 Zone Manager</h1>
         <div class="sub">Map presence zones to lights, areas, and entities</div>
       </div>
-      <button class="btn-add" id="addBtn">+ Add Zone</button>
+      <div style="display:flex;gap:10px;">
+        <button class="btn-add" id="settingsBtn" style="background:var(--divider-color);color:var(--primary-text-color);">Settings</button>
+        <button class="btn-add" id="addBtn">+ Add Zone</button>
+      </div>
     </div>
     <div class="card"><div id="ct"></div></div>
+
+    <div class="ov" id="gov">
+      <div class="modal">
+        <h2>Global Settings</h2>
+        <div class="sub" style="color:var(--secondary-text-color);font-size:.85em;margin-bottom:16px;">
+          These defaults apply to all zones that don't have their own values set.
+        </div>
+        <div class="f">
+          <label>Default active from (optional)</label>
+          <input id="gST" placeholder="e.g. 07:00, sunrise, sunset-30m">
+          <div class="hint">HH:MM, or sunrise/sunset with offset: sunset+2h, sunrise-30m</div>
+        </div>
+        <div class="f">
+          <label>Default active until (optional)</label>
+          <input id="gET" placeholder="e.g. 23:00, sunset+2h">
+        </div>
+        <div class="f">
+          <label>Default turn-off delay (seconds)</label>
+          <input type="number" id="gD" value="300" min="1" max="3600">
+        </div>
+        <div class="mbtns">
+          <button class="bc" id="gcn">Cancel</button>
+          <button class="bs" id="gsv">Save</button>
+        </div>
+      </div>
+    </div>
 
     <div class="ov" id="ov">
       <div class="modal">
@@ -216,10 +245,15 @@ class FP2ZoneManagerPanel extends HTMLElement {
       fS: $("fS"), fA: $("fA"), fE: $("fE"),
       fG: $("fG"), fD: $("fD"),
       fST: $("fST"), fET: $("fET"),
+      gov: $("gov"),
+      gST: $("gST"), gET: $("gET"), gD: $("gD"),
     };
     $("addBtn").onclick = () => this._open();
     $("cn").onclick = () => this._close();
     $("sv").onclick = () => this._save();
+    $("settingsBtn").onclick = () => this._openGlobal();
+    $("gcn").onclick = () => this._closeGlobal();
+    $("gsv").onclick = () => this._saveGlobal();
 
     const advToggle = $("advToggle");
     const advSec = $("advSec");
@@ -237,7 +271,38 @@ class FP2ZoneManagerPanel extends HTMLElement {
         { type: "fp2_zone_manager/zones/get" }
       );
       this._zones = r.zones || [];
-    } catch { this._zones = []; }
+      this._globalCfg = r.global || {};
+    } catch {
+      this._zones = [];
+      this._globalCfg = {};
+    }
+    this._render();
+  }
+
+  _openGlobal() {
+    const g = this._globalCfg || {};
+    this._el.gST.value = g.global_start || "";
+    this._el.gET.value = g.global_end || "";
+    this._el.gD.value = g.global_delay || 300;
+    this._el.gov.classList.add("open");
+  }
+
+  _closeGlobal() {
+    this._el.gov.classList.remove("open");
+  }
+
+  async _saveGlobal() {
+    const newGlobal = {
+      global_start: this._el.gST.value.trim(),
+      global_end: this._el.gET.value.trim(),
+      global_delay: parseInt(this._el.gD.value) || 300,
+    };
+    await this._hass.connection.sendMessagePromise({
+      type: "fp2_zone_manager/global/set",
+      global: newGlobal,
+    });
+    this._globalCfg = newGlobal;
+    this._closeGlobal();
     this._render();
   }
 
