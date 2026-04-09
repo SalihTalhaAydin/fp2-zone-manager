@@ -156,6 +156,20 @@ class FP2ZoneManagerPanel extends HTMLElement {
           <div class="hint">Additional specific lights/switches. Hold Ctrl/Cmd for multiple.</div>
         </div>
 
+        <div class="section-label">Active Time Window (optional)</div>
+
+        <div class="f">
+          <label>Start time</label>
+          <input id="fST" placeholder="e.g. 07:00, sunrise, sunset-30m">
+          <div class="hint">Fixed time (HH:MM), or sunrise/sunset with optional offset: sunset+2h, sunrise-30m, sunset+1h30m</div>
+        </div>
+
+        <div class="f">
+          <label>End time</label>
+          <input id="fET" placeholder="e.g. 23:00, sunset+2h">
+          <div class="hint">Leave both empty to always be active</div>
+        </div>
+
         <div class="section-label">Behavior</div>
 
         <div class="f">
@@ -181,6 +195,7 @@ class FP2ZoneManagerPanel extends HTMLElement {
       ct: $("ct"), ov: $("ov"), mt: $("mt"),
       fS: $("fS"), fA: $("fA"), fE: $("fE"),
       fG: $("fG"), fD: $("fD"),
+      fST: $("fST"), fET: $("fET"),
     };
     $("addBtn").onclick = () => this._open();
     $("cn").onclick = () => this._close();
@@ -213,7 +228,8 @@ class FP2ZoneManagerPanel extends HTMLElement {
     let h = `<table><thead><tr>
       <th style="width:50px">Status</th>
       <th>Sensors</th><th>Targets</th>
-      <th>Group</th><th>Delay</th><th style="width:130px"></th>
+      <th>Group</th><th>Window</th><th>Delay</th>
+      <th style="width:130px"></th>
     </tr></thead><tbody>`;
 
     z.forEach((zone, i) => {
@@ -248,11 +264,18 @@ class FP2ZoneManagerPanel extends HTMLElement {
       const grp = zone.group
         ? `<span class="grp">${zone.group}</span>` : "—";
 
+      const st = (zone.start_time || "").trim();
+      const et = (zone.end_time || "").trim();
+      const window = (st || et)
+        ? `${st || "—"} → ${et || "—"}`
+        : "Always";
+
       h += `<tr>
         <td><div class="dots">${dots}</div></td>
         <td><div class="chips">${sensorChips}</div></td>
         <td><div class="chips">${areaChips}${entChips}</div></td>
         <td>${grp}</td>
+        <td>${window}</td>
         <td>${zone.delay || 300}s</td>
         <td class="acts">
           <button class="abtn" data-a="e" data-i="${i}">Edit</button>
@@ -331,12 +354,16 @@ class FP2ZoneManagerPanel extends HTMLElement {
         o.selected = ents.includes(o.value));
       this._el.fG.value = z.group || "";
       this._el.fD.value = z.delay || 300;
+      this._el.fST.value = z.start_time || "";
+      this._el.fET.value = z.end_time || "";
     } else {
       Array.from(this._el.fS.options).forEach(o => o.selected = false);
       Array.from(this._el.fA.options).forEach(o => o.selected = false);
       Array.from(this._el.fE.options).forEach(o => o.selected = false);
       this._el.fG.value = "";
       this._el.fD.value = 300;
+      this._el.fST.value = "";
+      this._el.fET.value = "";
     }
 
     this._el.ov.classList.add("open");
@@ -368,6 +395,8 @@ class FP2ZoneManagerPanel extends HTMLElement {
       target_entities: ents,
       group: this._el.fG.value.trim(),
       delay: parseInt(this._el.fD.value) || 300,
+      start_time: this._el.fST.value.trim(),
+      end_time: this._el.fET.value.trim(),
     };
 
     const zones = [...this._zones];

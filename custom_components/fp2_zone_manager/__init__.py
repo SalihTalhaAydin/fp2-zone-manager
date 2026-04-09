@@ -17,9 +17,14 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
 )
 
+from datetime import datetime, time as dtime, timedelta
+
+import homeassistant.util.dt as dt_util
+
 from .const import (
     DOMAIN, CONF_SENSORS, CONF_TARGET_AREAS,
     CONF_TARGET_ENTITIES, CONF_GROUP, CONF_DELAY,
+    CONF_START_TIME, CONF_END_TIME,
     CONF_ZONES, DEFAULT_DELAY,
 )
 
@@ -190,6 +195,9 @@ class ZoneManager:
 
     @callback
     def _turn_on(self, z: dict):
+        if not self._in_window(z):
+            _LOGGER.debug("ON skipped, outside time window")
+            return
         key = self._key(z)
         if key in self._timers:
             self._timers.pop(key).cancel()
@@ -287,3 +295,133 @@ class ZoneManager:
         areas = z.get(CONF_TARGET_AREAS, [])
         ents = z.get(CONF_TARGET_ENTITIES, [])
         return "t_" + "_".join(sorted(areas + ents))
+
+    def _in_window(self, z: dict) -> bool:
+        """Check if current time is within zone's window."""
+        start = z.get(CONF_START_TIME, "")
+        end = z.get(CONF_END_TIME, "")
+        if not start and not end:
+            return True  # no window = always active
+
+        now = dt_util.now()
+        start_dt = self._resolve_time(start, now)
+        end_dt = self._resolve_time(end, now)
+
+        if start_dt is None or end_dt is None:
+            return True  # can't resolve, fail-open
+
+        # Handle windows that cross midnight
+        if start_dt <= end_dt:
+            return start_dt <= now <= end_dt
+        return now >= start_dt or now <= end_dt
+
+    def _resolve_time(self, t: str, now: datetime):
+        """Parse a time string into today's datetime.
+
+        Supports:
+        - "HH:MM" fixed time
+        - "sunrise" / "sunset"
+        - Offsets with h (hours) and m (minutes):
+          * "sunset+2h"     = 2 hours after sunset
+          * "sunrise-30m"   = 30 min before sunrise
+          * "sunset+1h30m"  = 1h 30m after sunset
+          * "sunset+30"     = 30 min after sunset (legacy)
+        """
+        if not t:
+            return None
+        t = t.strip().lower()
+
+        # Sun-based
+        if t.startswith("sunrise") or t.startswith("sunset"):
+            sun = self.hass.states.get("sun.sun")
+            if not sun:
+                return None
+            kind = (
+                "sunrise" if t.startswith("sunrise")
+                else "sunset"
+            )
+            attr_key = (
+                "next_rising" if kind == "sunrise"
+                else "next_setting"
+            )
+            raw = sun.attributes.get(attr_key)
+            if not raw:
+                return None
+            sun_dt = dt_util.parse_datetime(raw)
+            if not sun_dt:
+                return None
+            local = dt_util.as_local(sun_dt)
+            target = now.replace(
+                hour=local.hour,
+                minute=local.minute,
+                second=local.second,
+                microsecond=0,
+            )
+            # Apply offset
+            rest = t[len(kind):]
+            offset_mins = self._parse_offset(rest)
+            if offset_mins is not None:
+                target += timedelta(minutes=offset_mins)
+            return target
+
+        # Fixed HH:MM
+        try:
+            parts = t.split(":")
+            h = int(parts[0])
+            m = int(parts[1]) if len(parts) > 1 else 0
+            return now.replace(
+                hour=h, minute=m,
+                second=0, microsecond=0,
+            )
+        except (ValueError, IndexError):
+            return None
+
+    def _parse_offset(self, s: str) -> int | None:
+        """Parse offset string into minutes. Returns None if empty/invalid.
+
+        Examples:
+        - "+2h"     -> 120
+        - "-30m"    -> -30
+        - "+1h30m"  -> 90
+        - "+30"     -> 30 (legacy, assumes minutes)
+        - ""        -> None
+        """
+        if not s:
+            return None
+        sign = 1
+        if s[0] == "-":
+            sign = -1
+            s = s[1:]
+        elif s[0] == "+":
+            s = s[1:]
+
+        if not s:
+            return None
+
+        # Try "XhYm" or "Xh" or "Ym" format
+        total = 0
+        has_unit = False
+        buf = ""
+        for ch in s:
+            if ch.isdigit():
+                buf += ch
+            elif ch == "h":
+                if buf:
+                    total += int(buf) * 60
+                    has_unit = True
+                    buf = ""
+            elif ch == "m":
+                if buf:
+                    total += int(buf)
+                    has_unit = True
+                    buf = ""
+            else:
+                return None
+
+        # Leftover digits = legacy format (minutes)
+        if buf:
+            if has_unit:
+                return None  # invalid: mixed
+            total = int(buf)
+
+        return sign * total
