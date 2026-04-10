@@ -24,11 +24,24 @@ class FP2ZoneManagerPanel extends HTMLElement {
     options.forEach(o => addEl.add(new Option(o.label, o.value)));
     this._chipColorClass = this._chipColorClass || {};
     this._chipColorClass[id] = colorClass || "chip-default";
+    this._chipOpts = this._chipOpts || {};
+    this._chipOpts[id] = { options, addEl, label };
     addEl.onchange = () => {
       if (!addEl.value) return;
       this._addChip(id, addEl.value, options.find(o => o.value === addEl.value)?.label || addEl.value);
       addEl.value = "";
+      this._refreshDropdown(id);
     };
+  }
+
+  _refreshDropdown(id) {
+    const info = this._chipOpts?.[id];
+    if (!info) return;
+    const { options, addEl, label } = info;
+    const current = this._getChipValues(id);
+    addEl.innerHTML = `<option value="">+ Add ${label}...</option>`;
+    options.filter(o => !current.includes(o.value))
+      .forEach(o => addEl.add(new Option(o.label, o.value)));
   }
 
   _addChip(id, value, label) {
@@ -39,7 +52,10 @@ class FP2ZoneManagerPanel extends HTMLElement {
     chip.className = `cs-chip ${cc}`;
     chip.dataset.val = value;
     chip.innerHTML = `${label} <span class="cs-x">&times;</span>`;
-    chip.querySelector(".cs-x").onclick = () => chip.remove();
+    chip.querySelector(".cs-x").onclick = () => {
+      chip.remove();
+      this._refreshDropdown(id);
+    };
     chipsEl.appendChild(chip);
   }
 
@@ -448,12 +464,16 @@ class FP2ZoneManagerPanel extends HTMLElement {
         padding: 11px 14px;
         border: 1px solid rgba(255,255,255,0.08);
         border-radius: 10px;
-        background: rgba(255,255,255,0.04);
+        background: var(--card-background-color, #1e1e2e);
         color: var(--primary-text-color, #e1e1e1);
         font-size: 0.9em;
         font-family: inherit;
         box-sizing: border-box;
         transition: all 0.2s ease;
+      }
+      .f select option, .tp-sel option {
+        background: var(--card-background-color, #1e1e2e);
+        color: var(--primary-text-color, #e1e1e1);
       }
       .f select:focus, .f input:focus {
         outline: none;
@@ -609,12 +629,17 @@ class FP2ZoneManagerPanel extends HTMLElement {
         padding: 10px 14px;
         border: 1px dashed rgba(255,255,255,0.1);
         border-radius: 10px;
-        background: rgba(255,255,255,0.02);
-        color: var(--secondary-text-color, #9ca3af);
+        background: var(--card-background-color, #1e1e2e);
+        color: var(--primary-text-color, #e1e1e1);
         font-size: 0.87em;
         font-family: inherit;
         transition: all 0.2s ease;
         cursor: pointer;
+      }
+      .cs-add option {
+        background: var(--card-background-color, #1e1e2e);
+        color: var(--primary-text-color, #e1e1e1);
+        padding: 8px;
       }
       .cs-add:hover {
         border-color: rgba(255,255,255,0.2);
@@ -789,8 +814,20 @@ class FP2ZoneManagerPanel extends HTMLElement {
       .map(a => ({ value: a.area_id, label: a.name }));
   }
   _entityOpts() {
+    const skip = [
+      "led_indicator", "motion_detection", "ambient_light",
+      "do_not_disturb", "child_lock", "adguard",
+      "safe_search", "safe_browsing", "filtering",
+      "query_log", "parental_control", "protection",
+      "p1s_01p09c", "image_sensor", "camera",
+      "identify", "reboot", "refresh_state",
+    ];
     return Object.keys(this._hass.states)
-      .filter(e => e.startsWith("light.") || e.startsWith("switch.") || e.startsWith("fan."))
+      .filter(e => {
+        if (!e.startsWith("light.") && !e.startsWith("switch.") && !e.startsWith("fan.")) return false;
+        const lo = e.toLowerCase();
+        return !skip.some(s => lo.includes(s));
+      })
       .sort().map(e => ({ value: e, label: this._hass.states[e].attributes.friendly_name || e }));
   }
 
