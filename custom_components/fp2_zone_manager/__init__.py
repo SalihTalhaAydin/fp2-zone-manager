@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import voluptuous as vol
+import homeassistant.util.dt as dt_util
 
 from homeassistant.components import frontend, websocket_api
 from homeassistant.components.http import StaticPathConfig
@@ -17,13 +19,9 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
 )
 
-from datetime import datetime, timedelta
-
-import homeassistant.util.dt as dt_util
-
 from .const import (
     DOMAIN, CONF_SENSORS, CONF_TARGET_AREAS,
-    CONF_TARGET_ENTITIES, CONF_GROUP, CONF_DELAY,
+    CONF_TARGET_ENTITIES, CONF_DELAY,
     CONF_START_TIME, CONF_END_TIME,
     CONF_ZONES, CONF_GLOBAL, CONF_GLOBAL_START,
     CONF_GLOBAL_END, CONF_GLOBAL_DELAY,
@@ -108,9 +106,7 @@ def _ws_get(hass, conn, msg):
         zones = entries[0].data.get(CONF_ZONES, [])
         glb = entries[0].data.get(CONF_GLOBAL, {}) or {}
     conn.send_result(msg["id"], {
-        "zones": zones,
-        "entry_id": eid,
-        "global": glb,
+        "zones": zones, "entry_id": eid, "global": glb,
     })
 
 
@@ -121,7 +117,6 @@ def _ws_set(hass, conn, msg):
         conn.send_error(msg["id"], "not_found", "")
         return
     entry = entries[0]
-    # Preserve existing global config
     new_data = dict(entry.data)
     new_data[CONF_ZONES] = msg["zones"]
     hass.config_entries.async_update_entry(
@@ -187,7 +182,6 @@ class ZoneManager:
         zones = self._zones()
         if not zones:
             return
-        # Collect ALL sensors from all zones
         sensors = set()
         for z in zones:
             for s in z.get(CONF_SENSORS, []):
@@ -232,7 +226,6 @@ class ZoneManager:
     @callback
     def _turn_on(self, z: dict):
         if not self._in_window(z):
-            _LOGGER.debug("ON skipped, outside time window")
             return
         key = self._key(z)
         if key in self._timers:
@@ -243,9 +236,11 @@ class ZoneManager:
     @callback
     def _schedule_off(self, z: dict):
         key = self._key(z)
-        delay = z.get(CONF_DELAY) or self._global().get(
-            CONF_GLOBAL_DELAY
-        ) or DEFAULT_DELAY
+        delay = (
+            z.get(CONF_DELAY)
+            or self._global().get(CONF_GLOBAL_DELAY)
+            or DEFAULT_DELAY
+        )
         if key in self._timers:
             self._timers.pop(key).cancel()
         self._timers[key] = self.hass.loop.call_later(
@@ -258,29 +253,15 @@ class ZoneManager:
     async def _check_off(self, z: dict):
         key = self._key(z)
         self._timers.pop(key, None)
-
-        # Get all sensors that share this group
-        grp = z.get(CONF_GROUP, "")
-        if grp:
-            all_sensors = set()
-            for zz in self._zones():
-                if zz.get(CONF_GROUP) == grp:
-                    for s in zz.get(CONF_SENSORS, []):
-                        all_sensors.add(s)
-        else:
-            all_sensors = set(z.get(CONF_SENSORS, []))
-
-        # If ANY sensor is still on, don't turn off
-        for s in all_sensors:
+        # All sensors in this zone must be off
+        for s in z.get(CONF_SENSORS, []):
             st = self.hass.states.get(s)
             if st and st.state == STATE_ON:
                 return
-
         _LOGGER.info("OFF: %s", key)
         await self._async_call_services(z, "turn_off")
 
     def _call_services(self, z: dict, action: str):
-        """Call turn_on/turn_off for areas, lights, switches."""
         self.hass.async_create_task(
             self._async_call_services(z, action)
         )
@@ -288,23 +269,19 @@ class ZoneManager:
     async def _async_call_services(
         self, z: dict, action: str
     ):
-        """Handle areas + split entities by domain."""
         areas = z.get(CONF_TARGET_AREAS, [])
         ents = z.get(CONF_TARGET_ENTITIES, [])
 
-        # Areas — call light service (covers all lights)
         if areas:
             await self.hass.services.async_call(
                 "light", action, {},
                 target={"area_id": areas},
             )
-            # Also call switch for any switches in areas
             await self.hass.services.async_call(
                 "switch", action, {},
                 target={"area_id": areas},
             )
 
-        # Entities — split by domain
         lights = [e for e in ents if e.startswith("light.")]
         switches = [e for e in ents
                     if e.startswith("switch.")]
@@ -327,59 +304,35 @@ class ZoneManager:
             )
 
     def _key(self, z: dict) -> str:
-        grp = z.get(CONF_GROUP, "")
-        if grp:
-            return f"grp_{grp}"
         areas = z.get(CONF_TARGET_AREAS, [])
         ents = z.get(CONF_TARGET_ENTITIES, [])
-        return "t_" + "_".join(sorted(areas + ents))
+        sensors = z.get(CONF_SENSORS, [])
+        return "z_" + "_".join(
+            sorted(areas + ents + sensors)
+        )
 
     def _in_window(self, z: dict) -> bool:
-        """Check if current time is within zone's window.
-
-        Falls back to global window if zone has none set.
-        """
         start = z.get(CONF_START_TIME, "")
         end = z.get(CONF_END_TIME, "")
-
-        # Fall back to global window
         if not start and not end:
             g = self._global()
             start = g.get(CONF_GLOBAL_START, "")
             end = g.get(CONF_GLOBAL_END, "")
-
         if not start and not end:
-            return True  # no window = always active
-
+            return True
         now = dt_util.now()
-        start_dt = self._resolve_time(start, now)
-        end_dt = self._resolve_time(end, now)
-
-        if start_dt is None or end_dt is None:
-            return True  # can't resolve, fail-open
-
-        # Handle windows that cross midnight
-        if start_dt <= end_dt:
-            return start_dt <= now <= end_dt
-        return now >= start_dt or now <= end_dt
+        s = self._resolve_time(start, now)
+        e = self._resolve_time(end, now)
+        if s is None or e is None:
+            return True
+        if s <= e:
+            return s <= now <= e
+        return now >= s or now <= e
 
     def _resolve_time(self, t: str, now: datetime):
-        """Parse a time string into today's datetime.
-
-        Supports:
-        - "HH:MM" fixed time
-        - "sunrise" / "sunset"
-        - Offsets with h (hours) and m (minutes):
-          * "sunset+2h"     = 2 hours after sunset
-          * "sunrise-30m"   = 30 min before sunrise
-          * "sunset+1h30m"  = 1h 30m after sunset
-          * "sunset+30"     = 30 min after sunset (legacy)
-        """
         if not t:
             return None
         t = t.strip().lower()
-
-        # Sun-based
         if t.startswith("sunrise") or t.startswith("sunset"):
             sun = self.hass.states.get("sun.sun")
             if not sun:
@@ -388,11 +341,11 @@ class ZoneManager:
                 "sunrise" if t.startswith("sunrise")
                 else "sunset"
             )
-            attr_key = (
+            attr = (
                 "next_rising" if kind == "sunrise"
                 else "next_setting"
             )
-            raw = sun.attributes.get(attr_key)
+            raw = sun.attributes.get(attr)
             if not raw:
                 return None
             sun_dt = dt_util.parse_datetime(raw)
@@ -402,21 +355,16 @@ class ZoneManager:
             target = now.replace(
                 hour=local.hour,
                 minute=local.minute,
-                second=local.second,
-                microsecond=0,
+                second=0, microsecond=0,
             )
-            # Apply offset
             rest = t[len(kind):]
-            offset_mins = self._parse_offset(rest)
-            if offset_mins is not None:
-                target += timedelta(minutes=offset_mins)
+            off = self._parse_offset(rest)
+            if off is not None:
+                target += timedelta(minutes=off)
             return target
-
-        # Fixed HH:MM
         try:
             parts = t.split(":")
-            h = int(parts[0])
-            m = int(parts[1]) if len(parts) > 1 else 0
+            h, m = int(parts[0]), int(parts[1])
             return now.replace(
                 hour=h, minute=m,
                 second=0, microsecond=0,
@@ -425,15 +373,6 @@ class ZoneManager:
             return None
 
     def _parse_offset(self, s: str) -> int | None:
-        """Parse offset string into minutes. Returns None if empty/invalid.
-
-        Examples:
-        - "+2h"     -> 120
-        - "-30m"    -> -30
-        - "+1h30m"  -> 90
-        - "+30"     -> 30 (legacy, assumes minutes)
-        - ""        -> None
-        """
         if not s:
             return None
         sign = 1
@@ -442,11 +381,8 @@ class ZoneManager:
             s = s[1:]
         elif s[0] == "+":
             s = s[1:]
-
         if not s:
             return None
-
-        # Try "XhYm" or "Xh" or "Ym" format
         total = 0
         has_unit = False
         buf = ""
@@ -465,11 +401,8 @@ class ZoneManager:
                     buf = ""
             else:
                 return None
-
-        # Leftover digits = legacy format (minutes)
         if buf:
             if has_unit:
-                return None  # invalid: mixed
+                return None
             total = int(buf)
-
         return sign * total
