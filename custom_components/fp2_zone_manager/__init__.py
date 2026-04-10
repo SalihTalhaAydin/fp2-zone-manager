@@ -20,9 +20,9 @@ from homeassistant.helpers.event import (
 )
 
 from .const import (
-    DOMAIN, CONF_SENSORS, CONF_TARGET_AREAS,
-    CONF_TARGET_ENTITIES, CONF_DELAY,
-    CONF_START_TIME, CONF_END_TIME,
+    DOMAIN, CONF_ENABLED, CONF_SENSORS,
+    CONF_TARGET_AREAS, CONF_TARGET_ENTITIES,
+    CONF_DELAY, CONF_START_TIME, CONF_END_TIME,
     CONF_ZONES, CONF_GLOBAL, CONF_GLOBAL_START,
     CONF_GLOBAL_END, CONF_GLOBAL_DELAY,
     DEFAULT_DELAY,
@@ -51,7 +51,7 @@ async def async_setup_entry(
         frontend_url_path="fp2-zones",
         config={"_panel_custom": {
             "name": "fp2-zone-manager-panel",
-            "module_url": "/fp2_zone_manager/panel.js?v=200",
+            "module_url": "/fp2_zone_manager/panel.js?v=210",
         }},
         require_admin=False,
     )
@@ -184,6 +184,8 @@ class ZoneManager:
             return
         sensors = set()
         for z in zones:
+            if not z.get(CONF_ENABLED, True):
+                continue
             for s in z.get(CONF_SENSORS, []):
                 sensors.add(s)
         if not sensors:
@@ -216,6 +218,8 @@ class ZoneManager:
         if not ns or not os or ns.state == os.state:
             return
         for z in self._zones():
+            if not z.get(CONF_ENABLED, True):
+                continue
             if eid not in z.get(CONF_SENSORS, []):
                 continue
             if ns.state == STATE_ON:

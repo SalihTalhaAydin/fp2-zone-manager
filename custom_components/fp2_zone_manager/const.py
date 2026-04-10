@@ -2,6 +2,7 @@
 
 DOMAIN = "fp2_zone_manager"
 
+CONF_ENABLED = "enabled"
 CONF_SENSORS = "sensors"
 CONF_TARGET_AREAS = "target_areas"
 CONF_TARGET_ENTITIES = "target_entities"
