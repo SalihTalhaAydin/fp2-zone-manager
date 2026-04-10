@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6"/>
+      <stop offset="100%" style="stop-color:#6366f1"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#bg)"/>
+  <!-- Motion waves -->
+  <circle cx="128" cy="110" r="24" fill="none" stroke="white" stroke-width="8" opacity="0.9"/>
+  <path d="M88 80 A56 56 0 0 1 168 80" fill="none" stroke="white" stroke-width="7" stroke-linecap="round" opacity="0.6"/>
+  <path d="M68 58 A80 80 0 0 1 188 58" fill="none" stroke="white" stroke-width="6" stroke-linecap="round" opacity="0.35"/>
+  <!-- Light bulb -->
+  <circle cx="128" cy="178" r="18" fill="white" opacity="0.9"/>
+  <rect x="120" y="196" width="16" height="8" rx="3" fill="white" opacity="0.7"/>
+  <!-- Rays -->
+  <line x1="128" y1="152" x2="128" y2="146" stroke="white" stroke-width="4" stroke-linecap="round" opacity="0.5"/>
+  <line x1="148" y1="158" x2="153" y2="153" stroke="white" stroke-width="4" stroke-linecap="round" opacity="0.5"/>
+  <line x1="108" y1="158" x2="103" y2="153" stroke="white" stroke-width="4" stroke-linecap="round" opacity="0.5"/>
+</svg>
