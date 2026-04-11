@@ -44,6 +44,12 @@ async def async_setup_entry(
         )]
     )
 
+    # Force re-register panel with fresh cache-bust URL
+    try:
+        frontend.async_remove_panel(hass, "fp2-zones")
+    except Exception:
+        pass
+    ts = str(int(__import__("time").time()))
     frontend.async_register_built_in_panel(
         hass,
         component_name="custom",
@@ -52,8 +58,7 @@ async def async_setup_entry(
         frontend_url_path="fp2-zones",
         config={"_panel_custom": {
             "name": "fp2-zone-manager-panel",
-            "module_url": "/fp2_zone_manager/zmpanel.js"
-                    "?v=" + str(int(__import__("time").time())),
+            "module_url": f"/fp2_zone_manager/zmpanel.js?t={ts}",
         }},
         require_admin=False,
     )
