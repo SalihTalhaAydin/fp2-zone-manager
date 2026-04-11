@@ -22,7 +22,8 @@ from homeassistant.helpers.event import (
 from .const import (
     DOMAIN, CONF_ENABLED, CONF_SENSORS,
     CONF_TARGET_AREAS, CONF_TARGET_ENTITIES,
-    CONF_DELAY, CONF_START_TIME, CONF_END_TIME,
+    CONF_DELAY, CONF_ALWAYS_OFF,
+    CONF_START_TIME, CONF_END_TIME,
     CONF_ZONES, CONF_GLOBAL, CONF_GLOBAL_START,
     CONF_GLOBAL_END, CONF_GLOBAL_DELAY,
     DEFAULT_DELAY,
@@ -240,6 +241,10 @@ class ZoneManager:
 
     @callback
     def _schedule_off(self, z: dict):
+        # If always_off is false, respect the time window
+        if not z.get(CONF_ALWAYS_OFF, True):
+            if not self._in_window(z):
+                return
         key = self._key(z)
         delay = (
             z.get(CONF_DELAY)

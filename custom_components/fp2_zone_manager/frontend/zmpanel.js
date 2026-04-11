@@ -767,6 +767,11 @@ class FP2ZoneManagerPanel extends HTMLElement {
         <div class="adv-toggle" id="advT"><span class="arrow">&#9656;</span><span>Advanced options</span></div>
         <div class="adv-sec" id="advS">
           <div class="f"><label>Turn-off delay (seconds)</label><input type="number" id="fD" value="" min="1" max="3600" placeholder="Use global default"></div>
+          <div class="f" style="display:flex;align-items:center;gap:10px;">
+            <label class="toggle" style="flex-shrink:0"><input type="checkbox" id="fAO" checked><span class="slider"></span></label>
+            <div><span style="font-size:.9em;font-weight:500;">Always turn off</span>
+            <div class="hint" style="margin-top:2px;">Turn off lights when presence clears, even outside the active time window</div></div>
+          </div>
           <div class="f"><label>Active from</label><div id="zStartP"></div></div>
           <div class="f"><label>Active until</label><div id="zEndP"></div></div>
         </div>
@@ -775,7 +780,7 @@ class FP2ZoneManagerPanel extends HTMLElement {
     </div>`;
 
     const $ = id => this.shadowRoot.getElementById(id);
-    this._el = { ct:$("ct"), ov:$("ov"), mt:$("mt"), fD:$("fD"), gov:$("gov"), gD:$("gD"), globalBar:$("globalBar") };
+    this._el = { ct:$("ct"), ov:$("ov"), mt:$("mt"), fD:$("fD"), fAO:$("fAO"), gov:$("gov"), gD:$("gD"), globalBar:$("globalBar") };
 
     this._makeTimePicker("gStart", $("gStartP"));
     this._makeTimePicker("gEnd", $("gEndP"));
@@ -924,11 +929,13 @@ class FP2ZoneManagerPanel extends HTMLElement {
       this._setChipValues("csAreas", z.target_areas, aOpts);
       this._setChipValues("csEntities", z.target_entities, eOpts);
       this._el.fD.value = z.delay||"";
+      this._el.fAO.checked = z.always_off !== false;
       this._setTimePicker("zStart", z.start_time||"");
       this._setTimePicker("zEnd", z.end_time||"");
-      hasAdv = !!(z.delay||z.start_time||z.end_time);
+      hasAdv = !!(z.delay||z.start_time||z.end_time||z.always_off===false);
     } else {
       this._el.fD.value = "";
+      this._el.fAO.checked = true;
       this._setTimePicker("zStart","");
       this._setTimePicker("zEnd","");
     }
@@ -949,6 +956,7 @@ class FP2ZoneManagerPanel extends HTMLElement {
     const zone = {
       enabled: true, sensors, target_areas:areas, target_entities:ents,
       delay: parseInt(this._el.fD.value)||0,
+      always_off: this._el.fAO.checked,
       start_time: this._getTimePicker("zStart"),
       end_time: this._getTimePicker("zEnd"),
     };
