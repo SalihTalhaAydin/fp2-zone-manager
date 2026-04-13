@@ -58,7 +58,7 @@ async def async_setup_entry(
         frontend_url_path="fp2-zones",
         config={"_panel_custom": {
             "name": "fp2-zone-manager-panel",
-            "module_url": f"/fp2_zone_manager/zmpanel.js?t={ts}",
+            "module_url": f"/fp2_zone_manager/zm3.js?t={ts}",
         }},
         require_admin=False,
     )
