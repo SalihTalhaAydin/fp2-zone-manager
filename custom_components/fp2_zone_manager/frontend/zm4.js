@@ -597,7 +597,7 @@ class FP2ZoneManagerPanel extends HTMLElement {
         html += `
             <table class="zone-table">
               <thead><tr>
-                <th></th><th>Status</th><th>Sensors</th><th>Targets</th><th>Window</th><th>Delay</th><th></th>
+                <th style="width:90px">Status</th><th>Sensors</th><th>Targets</th><th>Window</th><th>Delay</th><th></th>
               </tr></thead>
               <tbody>`;
 
@@ -629,12 +629,14 @@ class FP2ZoneManagerPanel extends HTMLElement {
           html += `
                 <tr class="${z.enabled === false ? "zone-disabled" : ""}">
                   <td>
-                    <label class="toggle" title="Enable/disable zone">
-                      <input type="checkbox" data-action="toggleZone" data-gi="${gi}" data-zi="${zi}" ${z.enabled !== false ? "checked" : ""}>
-                      <span class="slider"></span>
-                    </label>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                      <label class="toggle" title="Enable/disable zone">
+                        <input type="checkbox" data-action="toggleZone" data-gi="${gi}" data-zi="${zi}" ${z.enabled !== false ? "checked" : ""}>
+                        <span class="slider"></span>
+                      </label>
+                      <div class="status-dots">${dots}</div>
+                    </div>
                   </td>
-                  <td><div class="status-dots">${dots}</div></td>
                   <td><div class="chip-list">${sensorChips || "<span class='inherit-label'>None</span>"}</div></td>
                   <td><div class="chip-list">${targetChips || "<span class='inherit-label'>None</span>"}</div></td>
                   <td>${windowStr}</td>
