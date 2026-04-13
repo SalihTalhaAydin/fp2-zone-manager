@@ -615,13 +615,16 @@ class FP2ZoneManagerPanel extends HTMLElement {
             ...(z.target_entities || []).map(e => `<span class="chip-sm chip-entity">${this._esc(this._entityName(e))}</span>`)
           ].join("");
 
+          const gWin = (g.start_time || g.end_time)
+            ? `${this._fmtTime(g.start_time)||"*"} → ${this._fmtTime(g.end_time)||"*"}`
+            : "Always";
           const windowStr = (z.start_time || z.end_time)
             ? `${this._fmtTime(z.start_time) || "*"} &rarr; ${this._fmtTime(z.end_time) || "*"}`
-            : `<span class="inherit-label">Group</span>`;
+            : `<span class="inherit-label">Group (${gWin})</span>`;
 
-          const delayStr = (z.delay !== undefined && z.delay !== null && z.delay !== "")
+          const delayStr = (z.delay && z.delay > 0)
             ? `${z.delay}s`
-            : `<span class="inherit-label">Group</span>`;
+            : `<span class="inherit-label">Group (${g.delay || 300}s)</span>`;
 
           html += `
                 <tr class="${z.enabled === false ? "zone-disabled" : ""}">
@@ -822,7 +825,7 @@ class FP2ZoneManagerPanel extends HTMLElement {
         <div class="adv-body" id="advBody">
           <div class="field">
             <label>Turn-off Delay (seconds)</label>
-            <input type="number" id="zDelay" value="${z.delay !== undefined && z.delay !== null && z.delay !== "" ? z.delay : ""}" min="0" placeholder="Use group default">
+            <input type="number" id="zDelay" value="${z.delay !== undefined && z.delay !== null && z.delay !== "" && z.delay > 0 ? z.delay : ""}" min="0" placeholder="Group default: ${g.delay || 300}s">
           </div>
           <div class="toggle-row">
             <span class="toggle-row-label">Always turn off when unoccupied</span>
