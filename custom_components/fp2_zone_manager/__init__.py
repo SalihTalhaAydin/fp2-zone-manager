@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import voluptuous as vol
@@ -20,13 +20,12 @@ from homeassistant.helpers.event import (
 )
 
 from .const import (
-    DOMAIN, CONF_ENABLED, CONF_SENSORS,
+    DOMAIN, CONF_GROUPS, CONF_GROUP_NAME,
+    CONF_ENABLED, CONF_SENSORS,
     CONF_TARGET_AREAS, CONF_TARGET_ENTITIES,
     CONF_DELAY, CONF_ALWAYS_OFF,
     CONF_START_TIME, CONF_END_TIME,
-    CONF_ZONES, CONF_GLOBAL, CONF_GLOBAL_START,
-    CONF_GLOBAL_END, CONF_GLOBAL_DELAY,
-    DEFAULT_DELAY,
+    CONF_ZONES, DEFAULT_DELAY,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -44,7 +43,6 @@ async def async_setup_entry(
         )]
     )
 
-    # Force re-register panel with fresh cache-bust URL
     try:
         frontend.async_remove_panel(hass, "fp2-zones")
     except Exception:
@@ -58,7 +56,7 @@ async def async_setup_entry(
         frontend_url_path="fp2-zones",
         config={"_panel_custom": {
             "name": "fp2-zone-manager-panel",
-            "module_url": f"/fp2_zone_manager/zm3.js?t={ts}",
+            "module_url": f"/fp2_zone_manager/zm4.js?t={ts}",
         }},
         require_admin=False,
     )
@@ -66,16 +64,12 @@ async def async_setup_entry(
     if "fp2_zm_ws" not in hass.data:
         hass.data["fp2_zm_ws"] = True
         websocket_api.async_register_command(
-            hass, "fp2_zone_manager/zones/get",
+            hass, "fp2_zone_manager/data/get",
             _ws_get, _WS_GET,
         )
         websocket_api.async_register_command(
-            hass, "fp2_zone_manager/zones/set",
+            hass, "fp2_zone_manager/data/set",
             _ws_set, _WS_SET,
-        )
-        websocket_api.async_register_command(
-            hass, "fp2_zone_manager/global/set",
-            _ws_set_global, _WS_SET_GLOBAL,
         )
 
     mgr = ZoneManager(hass, entry)
@@ -88,33 +82,33 @@ async def async_setup_entry(
 
 
 _WS_GET = websocket_api.BASE_COMMAND_MESSAGE_SCHEMA.extend(
-    {vol.Required("type"): "fp2_zone_manager/zones/get"}
+    {vol.Required("type"): "fp2_zone_manager/data/get"}
 )
 _WS_SET = websocket_api.BASE_COMMAND_MESSAGE_SCHEMA.extend(
     {
-        vol.Required("type"): "fp2_zone_manager/zones/set",
-        vol.Required("zones"): list,
+        vol.Required("type"): "fp2_zone_manager/data/set",
+        vol.Required("groups"): list,
     }
-)
-_WS_SET_GLOBAL = (
-    websocket_api.BASE_COMMAND_MESSAGE_SCHEMA.extend({
-        vol.Required("type"): "fp2_zone_manager/global/set",
-        vol.Required("global"): dict,
-    })
 )
 
 
 @callback
 def _ws_get(hass, conn, msg):
     entries = hass.config_entries.async_entries(DOMAIN)
-    zones, eid, glb = [], None, {}
+    groups = []
     if entries:
-        eid = entries[0].entry_id
-        zones = entries[0].data.get(CONF_ZONES, [])
-        glb = entries[0].data.get(CONF_GLOBAL, {}) or {}
-    conn.send_result(msg["id"], {
-        "zones": zones, "entry_id": eid, "global": glb,
-    })
+        groups = entries[0].data.get(CONF_GROUPS, [])
+        # Migration: convert old flat zones to a group
+        if not groups and entries[0].data.get(CONF_ZONES):
+            groups = [{
+                CONF_GROUP_NAME: "Default",
+                CONF_ENABLED: True,
+                CONF_START_TIME: "",
+                CONF_END_TIME: "",
+                CONF_DELAY: DEFAULT_DELAY,
+                CONF_ZONES: entries[0].data[CONF_ZONES],
+            }]
+    conn.send_result(msg["id"], {"groups": groups})
 
 
 @callback
@@ -124,30 +118,13 @@ def _ws_set(hass, conn, msg):
         conn.send_error(msg["id"], "not_found", "")
         return
     entry = entries[0]
-    new_data = dict(entry.data)
-    new_data[CONF_ZONES] = msg["zones"]
     hass.config_entries.async_update_entry(
-        entry, data=new_data
+        entry, data={CONF_GROUPS: msg["groups"]}
     )
     mgr = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if mgr:
         mgr.async_stop()
         hass.async_create_task(mgr.async_start())
-    conn.send_result(msg["id"], {"success": True})
-
-
-@callback
-def _ws_set_global(hass, conn, msg):
-    entries = hass.config_entries.async_entries(DOMAIN)
-    if not entries:
-        conn.send_error(msg["id"], "not_found", "")
-        return
-    entry = entries[0]
-    new_data = dict(entry.data)
-    new_data[CONF_GLOBAL] = msg["global"]
-    hass.config_entries.async_update_entry(
-        entry, data=new_data
-    )
     conn.send_result(msg["id"], {"success": True})
 
 
@@ -171,7 +148,7 @@ async def _on_update(
 
 
 class ZoneManager:
-    """Manages FP2 zone-to-light mappings."""
+    """Manages FP2 zone-to-light mappings with groups."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry):
         self.hass = hass
@@ -179,27 +156,34 @@ class ZoneManager:
         self._unsubs: list = []
         self._timers: dict[str, asyncio.TimerHandle] = {}
 
-    def _zones(self) -> list[dict]:
-        return self.entry.data.get(CONF_ZONES, [])
+    def _groups(self) -> list[dict]:
+        return self.entry.data.get(CONF_GROUPS, [])
 
-    def _global(self) -> dict:
-        return self.entry.data.get(CONF_GLOBAL, {}) or {}
+    def _all_zones(self) -> list[tuple[dict, dict]]:
+        """Return (group, zone) pairs for all enabled zones."""
+        result = []
+        for g in self._groups():
+            if not g.get(CONF_ENABLED, True):
+                continue
+            for z in g.get(CONF_ZONES, []):
+                if not z.get(CONF_ENABLED, True):
+                    continue
+                result.append((g, z))
+        return result
 
     async def async_start(self):
-        zones = self._zones()
-        if not zones:
+        pairs = self._all_zones()
+        if not pairs:
             return
         sensors = set()
-        for z in zones:
-            if not z.get(CONF_ENABLED, True):
-                continue
+        for _, z in pairs:
             for s in z.get(CONF_SENSORS, []):
                 sensors.add(s)
         if not sensors:
             return
         _LOGGER.info(
             "FP2 ZM: %d sensors, %d zones",
-            len(sensors), len(zones),
+            len(sensors), len(pairs),
         )
         self._unsubs.append(
             async_track_state_change_event(
@@ -224,19 +208,17 @@ class ZoneManager:
         os = event.data.get("old_state")
         if not ns or not os or ns.state == os.state:
             return
-        for z in self._zones():
-            if not z.get(CONF_ENABLED, True):
-                continue
+        for g, z in self._all_zones():
             if eid not in z.get(CONF_SENSORS, []):
                 continue
             if ns.state == STATE_ON:
-                self._turn_on(z)
+                self._turn_on(g, z)
             elif ns.state == STATE_OFF:
-                self._schedule_off(z)
+                self._schedule_off(g, z)
 
     @callback
-    def _turn_on(self, z: dict):
-        if not self._in_window(z):
+    def _turn_on(self, g: dict, z: dict):
+        if not self._in_window(g, z):
             return
         key = self._key(z)
         if key in self._timers:
@@ -245,15 +227,14 @@ class ZoneManager:
         self._call_services(z, "turn_on")
 
     @callback
-    def _schedule_off(self, z: dict):
-        # If always_off is false, respect the time window
+    def _schedule_off(self, g: dict, z: dict):
         if not z.get(CONF_ALWAYS_OFF, True):
-            if not self._in_window(z):
+            if not self._in_window(g, z):
                 return
         key = self._key(z)
         delay = (
             z.get(CONF_DELAY)
-            or self._global().get(CONF_GLOBAL_DELAY)
+            or g.get(CONF_DELAY)
             or DEFAULT_DELAY
         )
         if key in self._timers:
@@ -268,7 +249,6 @@ class ZoneManager:
     async def _check_off(self, z: dict):
         key = self._key(z)
         self._timers.pop(key, None)
-        # All sensors in this zone must be off
         for s in z.get(CONF_SENSORS, []):
             st = self.hass.states.get(s)
             if st and st.state == STATE_ON:
@@ -281,12 +261,9 @@ class ZoneManager:
             self._async_call_services(z, action)
         )
 
-    async def _async_call_services(
-        self, z: dict, action: str
-    ):
+    async def _async_call_services(self, z, action):
         areas = z.get(CONF_TARGET_AREAS, [])
         ents = z.get(CONF_TARGET_ENTITIES, [])
-
         if areas:
             await self.hass.services.async_call(
                 "light", action, {},
@@ -296,12 +273,9 @@ class ZoneManager:
                 "switch", action, {},
                 target={"area_id": areas},
             )
-
         lights = [e for e in ents if e.startswith("light.")]
-        switches = [e for e in ents
-                    if e.startswith("switch.")]
+        switches = [e for e in ents if e.startswith("switch.")]
         fans = [e for e in ents if e.startswith("fan.")]
-
         if lights:
             await self.hass.services.async_call(
                 "light", action, {},
@@ -322,17 +296,14 @@ class ZoneManager:
         areas = z.get(CONF_TARGET_AREAS, [])
         ents = z.get(CONF_TARGET_ENTITIES, [])
         sensors = z.get(CONF_SENSORS, [])
-        return "z_" + "_".join(
-            sorted(areas + ents + sensors)
-        )
+        return "z_" + "_".join(sorted(areas + ents + sensors))
 
-    def _in_window(self, z: dict) -> bool:
+    def _in_window(self, g: dict, z: dict) -> bool:
         start = z.get(CONF_START_TIME, "")
         end = z.get(CONF_END_TIME, "")
         if not start and not end:
-            g = self._global()
-            start = g.get(CONF_GLOBAL_START, "")
-            end = g.get(CONF_GLOBAL_END, "")
+            start = g.get(CONF_START_TIME, "")
+            end = g.get(CONF_END_TIME, "")
         if not start and not end:
             return True
         now = dt_util.now()
@@ -344,7 +315,7 @@ class ZoneManager:
             return s <= now <= e
         return now >= s or now <= e
 
-    def _resolve_time(self, t: str, now: datetime):
+    def _resolve_time(self, t, now):
         if not t:
             return None
         t = t.strip().lower()
@@ -352,14 +323,8 @@ class ZoneManager:
             sun = self.hass.states.get("sun.sun")
             if not sun:
                 return None
-            kind = (
-                "sunrise" if t.startswith("sunrise")
-                else "sunset"
-            )
-            attr = (
-                "next_rising" if kind == "sunrise"
-                else "next_setting"
-            )
+            kind = "sunrise" if t.startswith("sunrise") else "sunset"
+            attr = "next_rising" if kind == "sunrise" else "next_setting"
             raw = sun.attributes.get(attr)
             if not raw:
                 return None
@@ -368,8 +333,7 @@ class ZoneManager:
                 return None
             local = dt_util.as_local(sun_dt)
             target = now.replace(
-                hour=local.hour,
-                minute=local.minute,
+                hour=local.hour, minute=local.minute,
                 second=0, microsecond=0,
             )
             rest = t[len(kind):]
@@ -381,13 +345,12 @@ class ZoneManager:
             parts = t.split(":")
             h, m = int(parts[0]), int(parts[1])
             return now.replace(
-                hour=h, minute=m,
-                second=0, microsecond=0,
+                hour=h, minute=m, second=0, microsecond=0,
             )
         except (ValueError, IndexError):
             return None
 
-    def _parse_offset(self, s: str) -> int | None:
+    def _parse_offset(self, s):
         if not s:
             return None
         sign = 1
