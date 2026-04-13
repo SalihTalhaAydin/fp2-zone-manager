@@ -20,9 +20,14 @@ class FP2ZoneManagerPanel extends HTMLElement {
   /* ══════════════════════════════════════════
      WebSocket helpers
      ══════════════════════════════════════════ */
+  async _ws(msg) {
+    if (this._hass.callWS) return this._hass.callWS(msg);
+    return this._hass.connection.sendMessagePromise(msg);
+  }
+
   async _load() {
     try {
-      const r = await this._hass.callWS({ type: "fp2_zone_manager/data/get" });
+      const r = await this._ws({ type: "fp2_zone_manager/data/get" });
       this._groups = r.groups || [];
       this._render();
     } catch (e) { console.error("ZM4 load error", e); }
@@ -30,7 +35,7 @@ class FP2ZoneManagerPanel extends HTMLElement {
 
   async _save() {
     try {
-      await this._hass.callWS({ type: "fp2_zone_manager/data/set", groups: this._groups });
+      await this._ws({ type: "fp2_zone_manager/data/set", groups: this._groups });
       this._render();
     } catch (e) { console.error("ZM4 save error", e); }
   }
@@ -269,6 +274,19 @@ class FP2ZoneManagerPanel extends HTMLElement {
       }
       .btn-icon:hover { background: rgba(255,255,255,0.08); color: var(--primary-text-color, #e1e1e1); }
       .btn-icon.danger:hover { color: #ef4444; background: rgba(239,68,68,0.1); }
+      .zone-actions { display: flex; gap: 6px; align-items: center; }
+      .move-sel {
+        padding: 4px 6px; border-radius: 6px; font-size: .78em;
+        background: var(--card-background-color, #1e1e2e);
+        color: var(--secondary-text-color, #9ca3af);
+        border: 1px solid rgba(255,255,255,0.08);
+        cursor: pointer; font-family: inherit;
+      }
+      .move-sel option {
+        background: var(--card-background-color, #1e1e2e);
+        color: var(--primary-text-color, #e1e1e1);
+      }
+      .move-sel:hover { border-color: rgba(255,255,255,0.2); }
 
       /* ── Group card ── */
       .group-card {
@@ -618,8 +636,12 @@ class FP2ZoneManagerPanel extends HTMLElement {
                   <td><div class="chip-list">${targetChips || "<span class='inherit-label'>None</span>"}</div></td>
                   <td>${windowStr}</td>
                   <td>${delayStr}</td>
-                  <td>
+                  <td class="zone-actions">
                     <button class="btn-icon" data-action="editZone" data-gi="${gi}" data-zi="${zi}" title="Edit zone">&#9998;</button>
+                    <select class="move-sel" data-action="moveZone" data-gi="${gi}" data-zi="${zi}" title="Move to group">
+                      <option value="">Move...</option>
+                      ${this._groups.map((g2,j)=>j===gi?"":(`<option value="${j}">${g2.name}</option>`)).join("")}
+                    </select>
                     <button class="btn-icon danger" data-action="deleteZone" data-gi="${gi}" data-zi="${zi}" title="Delete zone">&#128465;</button>
                   </td>
                 </tr>`;
@@ -693,6 +715,14 @@ class FP2ZoneManagerPanel extends HTMLElement {
             this._groups[gi].zones.splice(zi, 1);
             this._save();
           }
+        });
+      } else if (action === "moveZone") {
+        el.addEventListener("change", () => {
+          const targetGi = parseInt(el.value);
+          if (isNaN(targetGi)) return;
+          const zone = this._groups[gi].zones.splice(zi, 1)[0];
+          this._groups[targetGi].zones.push(zone);
+          this._save();
         });
       }
     });
