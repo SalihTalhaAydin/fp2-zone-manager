@@ -798,9 +798,10 @@ class FP2ZoneManagerPanel extends HTMLElement {
      ══════════════════════════════════════════ */
   _openZoneModal(gi, zi) {
     const isNew = zi === -1;
+    const g = this._groups[gi];
     const z = isNew
       ? { enabled: true, sensors: [], target_areas: [], target_entities: [], delay: "", always_off: true, start_time: "", end_time: "" }
-      : { ...this._groups[gi].zones[zi] };
+      : { ...g.zones[zi] };
 
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
